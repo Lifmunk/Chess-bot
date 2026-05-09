@@ -1,0 +1,31 @@
+services:
+  # Backend API + Bot
+  - type: web
+    name: chess-club-backend
+    env: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_PATH
+        value: /data/chessclub.db
+      - key: ADMIN_PASSWORD
+        generateValue: true
+      - key: ADMIN_TOKEN_SECRET
+        generateValue: true
+      - fromGroup: chess-club-secrets
+    disk:
+      name: chess-data
+      mountPath: /data
+      sizeGB: 1
+
+  # Frontend (Can also be deployed as a static site on Render, but user asked for Vercel)
+  # I will just define the backend here as Vercel is handled via their UI/CLI.
+
+envVarGroups:
+  - name: chess-club-secrets
+    vars:
+      - key: DISCORD_BOT_TOKEN
+      - key: DISCORD_GUILD_ID
+      - key: DISCORD_ANNOUNCEMENT_CHANNEL_ID
+      - key: DISCORD_PUZZLE_CHANNEL_ID
+      - key: CORS_ORIGINS
