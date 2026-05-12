@@ -20,14 +20,25 @@ def get_db() -> AsyncIOMotorDatabase:
 
 async def init_db() -> None:
     global client, db
-    logging.info("Initializing MongoDB connection...")
+    
+    uri = settings.mongodb_uri
+    # Redact password for logging
+    log_uri = uri
+    if "@" in uri and "://" in uri:
+        prefix, rest = uri.split("://", 1)
+        if "@" in rest:
+            auth, host = rest.split("@", 1)
+            log_uri = f"{prefix}://****:****@{host}"
+
+    logging.info(f"Connecting to MongoDB: {log_uri}")
+    
     try:
         # We set a short server selection timeout for the initial check
         client = AsyncIOMotorClient(
-            settings.mongodb_uri,
+            uri,
             serverSelectionTimeoutMS=5000,
-            # Common fix for some SSL environments, though use with caution
-            # tlsAllowInvalidCertificates=False 
+            # Ensure we use the latest TLS version supported
+            tls=True if "mongodb+srv" in uri else None
         )
         db = client[settings.mongodb_db_name]
         
