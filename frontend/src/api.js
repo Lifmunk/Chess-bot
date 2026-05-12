@@ -1,4 +1,8 @@
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const ENV = import.meta.env.VITE_APP_ENV || "local";
+const DEFAULT_LOCAL_URL = "http://localhost:8000";
+const PRODUCTION_URL = "https://chess-bot-uflt.onrender.com";
+
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL || (ENV === "deployment" ? PRODUCTION_URL : DEFAULT_LOCAL_URL)).replace(/\/$/, "");
 
 async function request(path, { token, method = "GET", body, headers = {} } = {}) {
   const response = await fetch(`${BASE_URL}${path}`, {

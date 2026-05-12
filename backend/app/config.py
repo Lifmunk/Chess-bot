@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_name: str = "Chess Club Bot"
+    app_env: str = "local"  # "local" or "deployment"
     admin_password: str = "change-me"
     admin_token_secret: str = "change-this-secret"
     admin_token_ttl_hours: int = 168
@@ -32,8 +33,33 @@ class Settings(BaseSettings):
     backend_public_url: str = ""
 
     @property
+    def is_deployment(self) -> bool:
+        return self.app_env.lower() == "deployment"
+
+    @property
+    def effective_frontend_url(self) -> str:
+        if self.frontend_url:
+            return self.frontend_url.rstrip("/")
+        return "http://localhost:5173" if not self.is_deployment else ""
+
+    @property
+    def effective_backend_url(self) -> str:
+        if self.backend_public_url:
+            return self.backend_public_url.rstrip("/")
+        return "http://localhost:8000" if not self.is_deployment else ""
+
+    @property
     def cors_origin_list(self) -> list[str]:
-        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        if self.cors_origins == "*":
+            return ["*"]
+        
+        origins = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        
+        frontend = self.effective_frontend_url
+        if frontend and frontend not in origins:
+            origins.append(frontend)
+                
+        return origins
 
     @property
     def database_dir(self) -> Path:
