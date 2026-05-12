@@ -38,6 +38,19 @@ async def close_db() -> None:
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
+def parse_dt(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
 async def nuke_database() -> None:
     database = get_db()
     await database.tournaments.delete_many({})
@@ -143,6 +156,10 @@ async def update_tournament(tournament_id: str, fields: dict[str, Any]) -> dict[
     update_data = {k: v for k, v in fields.items() if k in allowed}
     if not update_data:
         return await get_tournament(tournament_id)
+    
+    for key in ["scheduled_for", "started_at", "finished_at"]:
+        if key in update_data:
+            update_data[key] = parse_dt(update_data[key])
         
     update_data["updated_at"] = utc_now()
     
@@ -165,19 +182,6 @@ async def get_leaderboard(limit: int = 10) -> list[dict[str, Any]]:
     return await cursor.to_list(length=limit)
 
 async def get_next_tournament() -> dict[str, Any] | None:
-    database = get_db()
-    now = utc_now()
-    doc = await database.tournaments.find_one(
-        {"status": "planned", "scheduled_for": {"$gt": now}},
-        sort=[("scheduled_for", 1)]
-    )
-    return _transform_doc(doc)
-s.find_one(
-        {"status": "planned", "scheduled_for": {"$gt": now}},
-        sort=[("scheduled_for", 1)]
-    )
-    return _transform_doc(doc)
-ment() -> dict[str, Any] | None:
     database = get_db()
     now = utc_now()
     doc = await database.tournaments.find_one(
