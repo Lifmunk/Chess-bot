@@ -43,7 +43,7 @@ A full-stack application for managing a chess club's activities, featuring a Fas
 4. `npm run dev`
 
 ### Testing
-- No automated tests currently exist. TODO: Implement unit and integration tests for API routes and bot commands.
+- No automated tests currently exist.
 
 ## Development Conventions
 
@@ -78,7 +78,7 @@ The bot registers several slash commands for community engagement:
 ### Advanced Features
 - **Automation Engine:**
   - **Auto-Start:** Tournaments can be set to automatically start and announce in Discord at their scheduled time.
-  - **Recurrence:** Support for daily, weekly, and monthly recurring tournaments (metadata stored for future auto-generation).
+  - **Recurrence:** Support for daily, weekly, and monthly recurring tournaments. When a recurring tournament starts, the next one is automatically scheduled.
 - **Automated Pings:** When a tournament winner is announced in the admin panel, the bot automatically pings the winner if they have linked their account.
 - **Data Management:** A "Nuke" feature in the admin panel allows for a complete reset of all tournament and user data.
 - **Dedicated Channels:** Tournament results can now be directed to a separate channel via `DISCORD_RESULTS_CHANNEL_ID`.

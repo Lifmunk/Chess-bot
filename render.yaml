@@ -18,9 +18,6 @@ services:
       mountPath: /data
       sizeGB: 1
 
-  # Frontend (Can also be deployed as a static site on Render, but user asked for Vercel)
-  # I will just define the backend here as Vercel is handled via their UI/CLI.
-
 envVarGroups:
   - name: chess-club-secrets
     vars:
@@ -28,4 +25,3 @@ envVarGroups:
       - key: DISCORD_GUILD_ID
       - key: DISCORD_ANNOUNCEMENT_CHANNEL_ID
       - key: DISCORD_PUZZLE_CHANNEL_ID
-      - key: CORS_ORIGINS

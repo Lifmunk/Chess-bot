@@ -115,17 +115,100 @@ npm run dev
 
 ## 🌐 Deployment Guide
 
-### Backend: Render.com
-1.  **Create a new Blueprint**: Connect your GitHub repository to Render and it will automatically detect the `render.yaml` file.
-2.  **Environment Variables**: Render will prompt you for the variables in the `chess-club-secrets` group (Discord tokens, etc.).
-3.  **Persistence**: The `render.yaml` automatically configures a **1GB Disk** mounted at `/data` to ensure your SQLite database persists across deployments.
+This project is set up for a split deployment:
 
-### Frontend: Vercel
-1.  **Import Project**: Push your code to GitHub and import the repository into Vercel.
-2.  **Root Directory**: Set the root directory to `frontend`.
-3.  **Framework Preset**: Select **Vite**.
-4.  **Environment Variables**: Add `VITE_API_BASE_URL` pointing to your Render backend URL (e.g., `https://chess-club-backend.onrender.com`).
-5.  **SPA Support**: The included `frontend/vercel.json` ensures that client-side routing works correctly.
+- **Backend** (FastAPI + Discord bot) on **Render**
+- **Frontend** (React + Vite) on **Vercel**
+
+The backend uses SQLite, so it needs persistent storage on Render. The frontend is a static Vite build that calls the backend through `VITE_API_BASE_URL`.
+
+---
+
+### 1. Deploy the backend on Render
+
+#### Option A: Using `render.yaml` (recommended)
+
+The included `render.yaml` at the repo root automates the backend setup. Just push to GitHub and create a **Blueprint** on Render.
+
+1. Push your repo to **GitHub**.
+2. Go to [Render Dashboard](https://dashboard.render.com) → **New +** → **Blueprint**.
+3. Connect your GitHub repo. Render will read `render.yaml` and create the `chess-club-backend` web service automatically.
+4. Before the first deploy, fill in the **Environment Variables** (see below).
+5. Click **Apply** and wait for the build to finish.
+
+#### Option B: Manual Web Service
+
+1. Push your repo to **GitHub**.
+2. On Render, create a **New Web Service**.
+3. Connect your repository.
+4. Set the following:
+   - **Name**: `chess-club-backend`
+   - **Environment**: `Python 3`
+   - **Build Command**: `pip install -r backend/requirements.txt`
+   - **Start Command**: `cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+5. Add a **Persistent Disk** (under Advanced):
+   - **Name**: `chess-data`
+   - **Mount Path**: `/data`
+   - **Size**: `1 GB`
+6. Set the **Environment Variables** (see table below).
+7. Click **Create Web Service**.
+
+#### Required Environment Variables
+
+| Variable | Description |
+|---|---|
+| `DATABASE_PATH` | Set to `/data/chessclub.db` (maps to the persistent disk) |
+| `ADMIN_PASSWORD` | A strong password for the admin dashboard login |
+| `ADMIN_TOKEN_SECRET` | A long random string for signing auth tokens |
+| `CORS_ORIGINS` | Your Vercel frontend URL (e.g. `https://chess-club.vercel.app`) |
+
+#### Optional Environment Variables (for Discord features)
+
+| Variable | Description |
+|---|---|
+| `DISCORD_BOT_TOKEN` | Your Discord bot token |
+| `DISCORD_GUILD_ID` | Your Discord server ID |
+| `DISCORD_ANNOUNCEMENT_CHANNEL_ID` | Channel for tournament announcements |
+| `DISCORD_RESULTS_CHANNEL_ID` | Channel for tournament results |
+| `DISCORD_PUZZLE_CHANNEL_ID` | Channel for daily puzzles |
+| `DISCORD_PLAYERS_ROLE_ID` | Role ID for regular players |
+| `DISCORD_VERIFIED_ROLE_ID` | Role ID for verified members |
+| `DISCORD_CHAMPION_ROLE_ID` | Role ID for tournament champions |
+| `FRONTEND_URL` | Your Vercel frontend URL |
+| `BACKEND_PUBLIC_URL` | Your Render backend URL (e.g. `https://chess-club-backend.onrender.com`) |
+
+> The app runs fine without Discord variables — bot features are simply disabled.
+
+---
+
+### 2. Deploy the frontend on Vercel
+
+1. Push your repo to **GitHub** (the same repo as the backend).
+2. Go to [Vercel Dashboard](https://vercel.com) → **Add New** → **Project**.
+3. Import your GitHub repository.
+4. Configure the project:
+   - **Root Directory**: Select `frontend` (click **Edit** → choose `frontend/`).
+   - **Framework Preset**: Vite should be auto-detected. If not, select **Vite**.
+   - **Build Command**: `npm run build` (auto-filled).
+   - **Output Directory**: `dist` (auto-filled).
+5. Add the **Environment Variable**:
+   - `VITE_API_BASE_URL`: Set to your Render backend URL, e.g. `https://chess-club-backend.onrender.com`
+6. Click **Deploy**.
+
+> The included `frontend/vercel.json` handles SPA rewrites, so direct URL navigation and page refreshes work correctly.
+
+---
+
+### 3. Post-deployment checklist
+
+- [ ] Confirm `https://your-render-app.onrender.com/health` returns `{"status":"ok"}`.
+- [ ] Open your Vercel app and verify the login page loads.
+- [ ] Sign in with the admin password set in Render's env vars.
+- [ ] Click **Test API Connection** in the dashboard — you should see a greeting from the backend.
+- [ ] If the dashboard can't reach the backend, verify:
+  - `CORS_ORIGINS` on Render includes the exact Vercel domain (no trailing slash).
+  - `VITE_API_BASE_URL` on Vercel is the full Render URL (e.g. `https://chess-club-backend.onrender.com`).
+  - Both services are deployed and not in a sleeping state (Render free tier spins down after inactivity — upgrade or use a uptime monitor for production).
 
 ---
 

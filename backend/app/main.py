@@ -97,6 +97,31 @@ class DiscordBridge:
             )
             if updated:
                 await self.announce_started(updated)
+                
+                # Handle recurrence
+                if t.get("is_automated") and t.get("recurrence") and t.get("scheduled_for"):
+                    from datetime import timedelta
+                    next_start = None
+                    if t["recurrence"] == "daily":
+                        next_start = t["scheduled_for"] + timedelta(days=1)
+                    elif t["recurrence"] == "weekly":
+                        next_start = t["scheduled_for"] + timedelta(days=7)
+                    elif t["recurrence"] == "monthly":
+                        # Simple 30-day approximation or month increment
+                        next_start = t["scheduled_for"] + timedelta(days=30)
+                    
+                    if next_start:
+                        db.create_tournament({
+                            "name": t["name"],
+                            "chesscom_link": t["chesscom_link"],
+                            "format": t["format"],
+                            "rated": t["rated"],
+                            "scheduled_for": next_start,
+                            "notes": t["notes"],
+                            "is_automated": True,
+                            "recurrence": t["recurrence"]
+                        })
+                        logging.info("Scheduled next recurring tournament for %s", next_start)
 
 
 discord_bridge = DiscordBridge(build_bot(settings))
