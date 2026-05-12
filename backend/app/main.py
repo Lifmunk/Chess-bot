@@ -199,7 +199,18 @@ def tournament_to_response(tournament: dict) -> TournamentOut:
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok"}
+    db_status = "ok"
+    try:
+        database = db.get_db()
+        await database.command("ping")
+    except Exception:
+        db_status = "error"
+    
+    return {
+        "status": "ok",
+        "database": db_status,
+        "version": "1.0.0"
+    }
 
 
 @app.get("/test")

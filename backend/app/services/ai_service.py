@@ -1,23 +1,27 @@
 import logging
 from typing import Any
-from groq import Groq
+
+from groq import AsyncGroq
+
 from ..config import get_settings
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
+
 class GroqService:
     def __init__(self):
         self.client = None
         if settings.groq_api_key:
-            self.client = Groq(api_key=settings.groq_api_key)
+            self.client = AsyncGroq(api_key=settings.groq_api_key)
         else:
             logger.warning("GROQ_API_KEY not set. AI features will be disabled.")
 
     async def generate_message(self, prompt_type: str, context: dict[str, Any]) -> str:
         if not self.client:
             return self._fallback_message(prompt_type, context)
-
+        
+        # ... (prompts dictionary remains the same)
         prompts = {
             "tournament_created": (
                 f"Generate an enthusiastic Discord announcement for a new chess tournament scheduled for {context.get('name')}. "
@@ -42,22 +46,22 @@ class GroqService:
             "funny_ask": (
                 f"The user asked: '{context.get('question')}'. "
                 "Reply in a very funny, sarcastic, and slightly obsessive chess-player personality. "
-                "Use chess metaphors for everything. Be witty and entertaining. "
+                "Be witty and entertaining. "
                 "Keep it very short, punchy, and hilarious. Maximum 2-3 sentences."
-            )
+            ),
         }
 
         prompt = prompts.get(prompt_type, "Hello from the Chess Club!")
 
         try:
-            # Note: Groq SDK might not be fully async in all versions, 
-            # but usually it's used in async contexts or has an async client.
-            # Using the standard client for simplicity as per user example.
-            completion = self.client.chat.completions.create(
-                model="llama-3.3-70b-versatile", # Using a common Groq model
+            completion = await self.client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
                 messages=[
-                    {"role": "system", "content": "You are a hilarious, chess-obsessed Grandmaster who sees the world through 64 squares. You are sarcastic, witty, and always relate everything back to chess theory."},
-                    {"role": "user", "content": prompt}
+                    {
+                        "role": "system",
+                        "content": "You are a hilarious, chess-obsessed Grandmaster who sees the world through 64 squares. You are sarcastic, witty, and always relate everything back to chess theory.",
+                    },
+                    {"role": "user", "content": prompt},
                 ],
                 temperature=0.9,
                 max_tokens=150,
@@ -78,5 +82,6 @@ class GroqService:
         if prompt_type == "tournament_finished":
             return f"🏁 **Tournament {context.get('name')} Finished!**\nWinner: {context.get('winner')}"
         return "New chess event update!"
+
 
 ai_service = GroqService()

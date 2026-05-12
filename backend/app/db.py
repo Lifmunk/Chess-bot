@@ -21,13 +21,29 @@ def get_db() -> AsyncIOMotorDatabase:
 async def init_db() -> None:
     global client, db
     logging.info("Initializing MongoDB connection...")
-    client = AsyncIOMotorClient(settings.mongodb_uri)
-    db = client[settings.mongodb_db_name]
-    # Create indexes
-    await db.tournaments.create_index("tournament_id", unique=True)
-    await db.users.create_index("discord_id", unique=True)
-    await db.users.create_index("chesscom_username", unique=True)
-    logging.info("MongoDB connection established and indexes created.")
+    try:
+        # We set a short server selection timeout for the initial check
+        client = AsyncIOMotorClient(
+            settings.mongodb_uri,
+            serverSelectionTimeoutMS=5000,
+            # Common fix for some SSL environments, though use with caution
+            # tlsAllowInvalidCertificates=False 
+        )
+        db = client[settings.mongodb_db_name]
+        
+        # Verify connection
+        await client.admin.command('ping')
+        logging.info("Successfully pinged MongoDB.")
+
+        # Create indexes
+        await db.tournaments.create_index("tournament_id", unique=True)
+        await db.users.create_index("discord_id", unique=True)
+        await db.users.create_index("chesscom_username", unique=True)
+        logging.info("MongoDB connection established and indexes created.")
+    except Exception as e:
+        logging.error(f"Failed to initialize MongoDB: {e}")
+        logging.error("Check your MONGODB_URI and ensure your IP is allow-listed if using Atlas.")
+        raise
 
 async def close_db() -> None:
     global client

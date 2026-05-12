@@ -120,6 +120,7 @@ npm run dev
 The included `render.yaml` at the repo root automates the backend setup. Render is recommended for the FastAPI + Discord bot services.
 - Connect your GitHub repo to Render as a **Blueprint**.
 - Configure the required environment variables (MONGODB_URI, ADMIN_PASSWORD, etc.).
+- **Important (MongoDB Atlas):** Since Render uses dynamic IP addresses, you must go to your MongoDB Atlas dashboard and set **Network Access** to allow access from anywhere (`0.0.0.0/0`).
 
 ### 2. Frontend (Vercel)
 - Deploy the `frontend/` directory to Vercel.

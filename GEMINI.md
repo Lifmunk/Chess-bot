@@ -5,15 +5,15 @@ A full-stack application for managing a chess club's activities, featuring a Fas
 ## Core Technologies
 - **Backend:** FastAPI (Python 3.13+), `discord.py` for bot logic, `uvicorn` as the ASGI server.
 - **Frontend:** React 19, Vite 6, Vanilla CSS.
-- **Database:** SQLite (local `.db` file).
-- **External APIs:** Lichess (puzzles), Chess.com (tournament links).
+- **Database:** MongoDB (via `motor` for async access).
+- **External APIs:** Lichess (puzzles), Chess.com (tournament links), Groq AI (announcements).
 
 ## Architecture
 - **Monorepo Structure:**
   - `backend/`: Contains the FastAPI application and Discord bot.
   - `frontend/`: Contains the React admin panel.
 - **Discord Bot:** Integrated into the FastAPI process using a `DiscordBridge` class and `lifespan` events.
-- **State Management:** SQLite for persisting tournament data.
+- **State Management:** MongoDB for persisting tournament, user, and leaderboard data.
 - **Authentication:** Simple shared admin password and token-based (itsdangerous) session management.
 
 ## Building and Running
@@ -21,8 +21,10 @@ A full-stack application for managing a chess club's activities, featuring a Fas
 ### Prerequisites
 - Python 3.13+
 - Node.js (Latest LTS recommended)
+- MongoDB (Local or Atlas)
 - Docker & Docker Compose (Recommended for local setup)
 - A Discord Bot Token (configured in `backend/.env`)
+- A Groq API Key (configured in `backend/.env`)
 
 ### Docker Setup (Recommended)
 1. Configure `backend/.env` and `frontend/.env`.
@@ -33,7 +35,7 @@ A full-stack application for managing a chess club's activities, featuring a Fas
 #### Backend (Render)
 1. Create a new "Blueprint" on Render and connect this repository.
 2. Render will use the `render.yaml` file to set up the backend service.
-3. Ensure you configure the `GROQ_API_KEY` and `DISCORD_BOT_TOKEN` in the Render environment variables or Secret Group.
+3. Ensure you configure the `MONGODB_URI`, `GROQ_API_KEY`, and `DISCORD_BOT_TOKEN` in the Render environment variables or Secret Group.
 4. The backend is configured to run via Docker for consistency.
 
 #### Frontend (Vercel)

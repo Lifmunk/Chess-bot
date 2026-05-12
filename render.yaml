@@ -20,6 +20,10 @@ services:
         sync: false
       - key: CORS_ORIGINS
         sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: BACKEND_PUBLIC_URL
+        sync: false
       - fromGroup: chess-club-secrets
 
 envVarGroups:
