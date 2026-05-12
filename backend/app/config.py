@@ -12,7 +12,9 @@ class Settings(BaseSettings):
     admin_token_secret: str = "change-this-secret"
     admin_token_ttl_hours: int = 168
 
-    database_path: Path = Path("data/chessclub.db")
+    mongodb_uri: str = "mongodb://localhost:27017"
+    mongodb_db_name: str = "chessclub"
+    groq_api_key: str = ""
     cors_origins: str = "http://localhost:5173"
 
     discord_bot_token: str = ""

@@ -59,7 +59,6 @@ class DiscordBridge:
             except asyncio.TimeoutError:
                 self.task.cancel()
             except Exception:
-                # The task may already have failed; shutdown should still complete cleanly.
                 pass
 
     async def _wait_for_ready(self) -> bool:
@@ -85,10 +84,10 @@ class DiscordBridge:
             await self.bot.announce_tournament_results(tournament)
 
     async def check_automated_starts(self) -> None:
-        pending = db.get_pending_automated_starts()
+        pending = await db.get_pending_automated_starts()
         for t in pending:
             logging.info("Automating start for tournament %s", t["tournament_id"])
-            updated = db.update_tournament(
+            updated = await db.update_tournament(
                 t["tournament_id"],
                 {
                     "status": "started",
@@ -107,11 +106,11 @@ class DiscordBridge:
                     elif t["recurrence"] == "weekly":
                         next_start = t["scheduled_for"] + timedelta(days=7)
                     elif t["recurrence"] == "monthly":
-                        # Simple 30-day approximation or month increment
+                        # Better monthly recurrence: 30 days for now or exact month logic
                         next_start = t["scheduled_for"] + timedelta(days=30)
                     
                     if next_start:
-                        db.create_tournament({
+                        await db.create_tournament({
                             "name": t["name"],
                             "chesscom_link": t["chesscom_link"],
                             "format": t["format"],
@@ -138,7 +137,7 @@ async def automation_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    db.ensure_database()
+    await db.init_db()
     await discord_bridge.start()
     app.state.discord = discord_bridge
     # Start automation loop in background
@@ -147,6 +146,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         await discord_bridge.close()
+        await db.close_db()
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -199,8 +199,16 @@ async def get_tournaments(
     q: str | None = None,
     _: dict = Depends(require_admin),
 ) -> TournamentListResponse:
-    items = [tournament_to_response(item) for item in db.list_tournaments(status_filter, q)]
+    items = [tournament_to_response(item) for item in await db.list_tournaments(status_filter, q)]
     return TournamentListResponse(items=items)
+
+
+@app.get("/tournaments/leaderboard")
+async def get_leaderboard(
+    limit: int = 10,
+    _: dict = Depends(require_admin),
+):
+    return await db.get_leaderboard(limit)
 
 
 @app.post("/tournaments", response_model=TournamentOut, status_code=status.HTTP_201_CREATED)
@@ -208,7 +216,7 @@ async def create_tournament(
     payload: TournamentCreate,
     _: dict = Depends(require_admin),
 ) -> TournamentOut:
-    tournament = db.create_tournament(payload.model_dump())
+    tournament = await db.create_tournament(payload.model_dump())
     await app.state.discord.announce_created(tournament)
     return tournament_to_response(tournament)
 
@@ -218,7 +226,7 @@ async def read_tournament(
     tournament_id: str,
     _: dict = Depends(require_admin),
 ) -> TournamentOut:
-    tournament = db.get_tournament(tournament_id)
+    tournament = await db.get_tournament(tournament_id)
     if not tournament:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tournament not found")
     return tournament_to_response(tournament)
@@ -229,7 +237,7 @@ async def start_tournament(
     tournament_id: str,
     _: dict = Depends(require_admin),
 ) -> TournamentOut:
-    tournament = db.update_tournament(
+    tournament = await db.update_tournament(
         tournament_id,
         {
             "status": "started",
@@ -248,7 +256,7 @@ async def finish_tournament(
     payload: TournamentResultUpdate,
     _: dict = Depends(require_admin),
 ) -> TournamentOut:
-    tournament = db.update_tournament(
+    tournament = await db.update_tournament(
         tournament_id,
         {
             "status": "finished",
@@ -296,7 +304,7 @@ async def templates(_: dict = Depends(require_admin)) -> dict[str, list[str]]:
 
 @app.post("/nuke", status_code=status.HTTP_204_NO_CONTENT)
 async def nuke(_: dict = Depends(require_admin)) -> Response:
-    db.nuke_database()
+    await db.nuke_database()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

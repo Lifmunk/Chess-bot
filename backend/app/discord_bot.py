@@ -10,14 +10,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from .config import Settings
-from .db import (
-    get_chesscom_username_by_discord,
-    get_leaderboard,
-    get_next_tournament,
-    get_tournament,
-    get_user_by_chesscom,
-    link_user,
-)
+from . import db
 from .services.chesscom import build_stats_summary, fetch_chesscom_stats
 from .services.lichess import fetch_daily_puzzle, puzzle_message, render_puzzle_jpg
 
@@ -126,20 +119,10 @@ class ChessClubBot(commands.Bot):
         await self.safe_send(self.announcement_channel_id(), content=self.announcement_mention(), embed=embed)
 
     async def announce_tournament_results(self, tournament: dict[str, Any]) -> None:
-        def format_result(label: str, username: str | None) -> str:
-            if not username:
-                return f"{label}: not set"
-            discord_id = get_user_by_chesscom(username)
-            ping = f"<@{discord_id}>" if discord_id else f"`{username}`"
-            return f"{label}: {ping}"
-
+        ai_description = await ai_service.generate_message("tournament_finished", tournament)
         embed = discord.Embed(
             title="Tournament results",
-            description=(
-                f"{format_result('Winner', tournament.get('winner'))}\n"
-                f"{format_result('Runner-up', tournament.get('runner_up'))}\n"
-                f"{format_result('Third place', tournament.get('third_place'))}"
-            ),
+            description=ai_description,
             color=discord.Color.gold(),
         )
 
@@ -152,7 +135,7 @@ class ChessClubBot(commands.Bot):
         # Assign champion role if configured
         winner_username = tournament.get("winner")
         if winner_username and self.settings.discord_champion_role_id and self.settings.discord_guild_id:
-            discord_id = get_user_by_chesscom(winner_username)
+            discord_id = await db.get_user_by_chesscom(winner_username)
             if discord_id:
                 guild = self.get_guild(self.settings.discord_guild_id)
                 if guild:
@@ -228,7 +211,7 @@ def build_bot(settings: Settings) -> ChessClubBot:
     @bot.tree.command(name="link", description="Link your Chess.com username to your Discord account")
     @app_commands.describe(username="Your Chess.com username")
     async def link_command(interaction: discord.Interaction, username: str) -> None:
-        link_user(str(interaction.user.id), username)
+        await db.link_user(str(interaction.user.id), username)
 
         role_added = False
         if bot.settings.discord_verified_role_id and bot.settings.discord_guild_id:
@@ -255,7 +238,7 @@ def build_bot(settings: Settings) -> ChessClubBot:
     @app_commands.describe(username="Chess.com username. Leave blank to use your linked account.")
     async def stats_command(interaction: discord.Interaction, username: str | None = None) -> None:
         await interaction.response.defer(ephemeral=True)
-        target_username = username or get_chesscom_username_by_discord(str(interaction.user.id))
+        target_username = username or await db.get_chesscom_username_by_discord(str(interaction.user.id))
         if not target_username:
             await interaction.followup.send("Provide a Chess.com username or link your account with /link first.", ephemeral=True)
             return
@@ -297,7 +280,7 @@ def build_bot(settings: Settings) -> ChessClubBot:
 
     @bot.tree.command(name="leaderboard", description="Show the top club players by tournament wins")
     async def leaderboard_command(interaction: discord.Interaction) -> None:
-        leaders = get_leaderboard()
+        leaders = await db.get_leaderboard()
         if not leaders:
             await interaction.response.send_message("No finished tournaments are available yet.")
             return
@@ -312,12 +295,12 @@ def build_bot(settings: Settings) -> ChessClubBot:
 
     @bot.tree.command(name="next", description="Show the details of the next scheduled tournament")
     async def next_tournament(interaction: discord.Interaction) -> None:
-        tournament = get_next_tournament()
+        tournament = await db.get_next_tournament()
         if not tournament:
             await interaction.response.send_message("No upcoming tournaments are scheduled.")
             return
         
-        scheduled_for = tournament['scheduled_for'].strftime("%Y-%m-%d %H:%M UTC") if tournament['scheduled_for'] else "Not set"
+        scheduled_for = f"<t:{int(tournament['scheduled_for'].timestamp())}:F>" if tournament['scheduled_for'] else "Not set"
         embed = discord.Embed(
             title=f"Next tournament: {tournament['name']}",
             description=(
@@ -335,7 +318,7 @@ def build_bot(settings: Settings) -> ChessClubBot:
     @tournament_group.command(name="info", description="Show a stored tournament by ID")
     @app_commands.describe(tournament_id="The unique tournament ID")
     async def tournament_info(interaction: discord.Interaction, tournament_id: str) -> None:
-        tournament = get_tournament(tournament_id)
+        tournament = await db.get_tournament(tournament_id)
         if not tournament:
             await interaction.response.send_message("Tournament not found.", ephemeral=True)
             return
@@ -348,6 +331,24 @@ def build_bot(settings: Settings) -> ChessClubBot:
             f"Chess.com: {tournament['chesscom_link']}"
         )
         await interaction.response.send_message(message, ephemeral=True)
+
+    bot.tree.add_command(tournament_group)
+    return bot
+tion.response.send_message("Tournament not found.", ephemeral=True)
+            return
+        message = (
+            f"**{tournament['name']}**\n"
+            f"ID: `{tournament['tournament_id']}`\n"
+            f"Format: `{tournament['format']}`\n"
+            f"Rated: `{('Yes' if tournament['rated'] else 'No')}`\n"
+            f"Status: `{tournament['status']}`\n"
+            f"Chess.com: {tournament['chesscom_link']}"
+        )
+        await interaction.response.send_message(message, ephemeral=True)
+
+    bot.tree.add_command(tournament_group)
+    return bot
+ral=True)
 
     bot.tree.add_command(tournament_group)
     return bot

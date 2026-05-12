@@ -61,6 +61,10 @@ export function getTemplates(token) {
   return request("/templates", { token });
 }
 
+export function getLeaderboard(token) {
+  return request("/tournaments/leaderboard", { token });
+}
+
 export function nuke(token) {
   return request("/nuke", { token, method: "POST" });
 }

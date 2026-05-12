@@ -6,17 +6,17 @@ services:
     buildCommand: pip install -r backend/requirements.txt
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
-      - key: DATABASE_PATH
-        value: /data/chessclub.db
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DB_NAME
+        value: chessclub
       - key: ADMIN_PASSWORD
-        generateValue: true
+        sync: false
       - key: ADMIN_TOKEN_SECRET
-        generateValue: true
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
       - fromGroup: chess-club-secrets
-    disk:
-      name: chess-data
-      mountPath: /data
-      sizeGB: 1
 
 envVarGroups:
   - name: chess-club-secrets
@@ -25,3 +25,7 @@ envVarGroups:
       - key: DISCORD_GUILD_ID
       - key: DISCORD_ANNOUNCEMENT_CHANNEL_ID
       - key: DISCORD_PUZZLE_CHANNEL_ID
+      - key: DISCORD_RESULTS_CHANNEL_ID
+      - key: DISCORD_PLAYERS_ROLE_ID
+      - key: DISCORD_VERIFIED_ROLE_ID
+      - key: DISCORD_CHAMPION_ROLE_ID
