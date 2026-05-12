@@ -13,6 +13,7 @@ from .config import Settings
 from . import db
 from .services.chesscom import build_stats_summary, fetch_chesscom_stats
 from .services.lichess import fetch_daily_puzzle, puzzle_message, render_puzzle_jpg
+from .services.ai_service import ai_service
 
 
 logger = logging.getLogger(__name__)
@@ -86,12 +87,10 @@ class ChessClubBot(commands.Bot):
                 logger.error("Unexpected error sending Discord message: %s", e)
 
     async def announce_tournament_created(self, tournament: dict[str, Any]) -> None:
+        ai_description = await ai_service.generate_message("tournament_created", tournament)
         embed = discord.Embed(
             title="Tournament scheduled",
-            description=(
-                f"{tournament['name']}\n"
-                f"Review the details below and share the link with players."
-            ),
+            description=ai_description,
             color=discord.Color.blue(),
         )
         embed.add_field(name="Tournament ID", value=tournament["tournament_id"], inline=True)
@@ -106,12 +105,10 @@ class ChessClubBot(commands.Bot):
         await self.safe_send(self.announcement_channel_id(), content=self.announcement_mention(), embed=embed)
 
     async def announce_tournament_started(self, tournament: dict[str, Any]) -> None:
+        ai_description = await ai_service.generate_message("tournament_started", tournament)
         embed = discord.Embed(
             title="Tournament started",
-            description=(
-                f"{tournament['name']}\n"
-                f"Players can join now using the official Chess.com link."
-            ),
+            description=ai_description,
             color=discord.Color.green(),
         )
         embed.add_field(name="Tournament ID", value=tournament["tournament_id"], inline=True)
@@ -331,24 +328,6 @@ def build_bot(settings: Settings) -> ChessClubBot:
             f"Chess.com: {tournament['chesscom_link']}"
         )
         await interaction.response.send_message(message, ephemeral=True)
-
-    bot.tree.add_command(tournament_group)
-    return bot
-tion.response.send_message("Tournament not found.", ephemeral=True)
-            return
-        message = (
-            f"**{tournament['name']}**\n"
-            f"ID: `{tournament['tournament_id']}`\n"
-            f"Format: `{tournament['format']}`\n"
-            f"Rated: `{('Yes' if tournament['rated'] else 'No')}`\n"
-            f"Status: `{tournament['status']}`\n"
-            f"Chess.com: {tournament['chesscom_link']}"
-        )
-        await interaction.response.send_message(message, ephemeral=True)
-
-    bot.tree.add_command(tournament_group)
-    return bot
-ral=True)
 
     bot.tree.add_command(tournament_group)
     return bot
