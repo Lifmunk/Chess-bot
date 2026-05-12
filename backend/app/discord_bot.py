@@ -145,6 +145,18 @@ class ChessClubBot(commands.Bot):
                     except Exception as e:
                         logger.warning("Failed to assign Champion role: %s", e)
 
+    async def announce_tournament_reminder(self, tournament: dict[str, Any], time_left: str) -> None:
+        context = {**tournament, "time_left": time_left}
+        ai_description = await ai_service.generate_message("reminder", context)
+        embed = discord.Embed(
+            title=f"Tournament Reminder: {tournament['name']}",
+            description=ai_description,
+            color=discord.Color.orange(),
+        )
+        embed.add_field(name="Starts in", value=time_left, inline=True)
+        embed.add_field(name="Link", value=f"[Open Chess.com tournament]({tournament['chesscom_link']})", inline=False)
+        await self.safe_send(self.announcement_channel_id(), content=self.announcement_mention(), embed=embed)
+
     async def post_daily_puzzle(self) -> None:
         try:
             puzzle = await fetch_daily_puzzle()
@@ -204,6 +216,13 @@ def build_bot(settings: Settings) -> ChessClubBot:
                 jpg_path.unlink(missing_ok=True)
             except OSError:
                 logger.warning("Failed to remove temporary puzzle image %s", jpg_path)
+
+    @bot.tree.command(name="ask", description="Ask the Grandmaster anything (funny responses only)")
+    @app_commands.describe(question="What do you want to ask?")
+    async def ask_command(interaction: discord.Interaction, question: str) -> None:
+        await interaction.response.defer()
+        answer = await ai_service.ask_funny_question(question)
+        await interaction.followup.send(f"**Question:** {question}\n\n{answer}")
 
     @bot.tree.command(name="link", description="Link your Chess.com username to your Discord account")
     @app_commands.describe(username="Your Chess.com username")

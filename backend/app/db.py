@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from secrets import token_hex
 from typing import Any
 
@@ -89,6 +89,8 @@ async def create_tournament(payload: dict[str, Any]) -> dict[str, Any]:
         "notes": payload.get("notes", ""),
         "is_automated": bool(payload.get("is_automated", False)),
         "recurrence": payload.get("recurrence"),
+        "reminder_sent": False,
+        "results_fetched": False,
         "created_at": now,
         "updated_at": now,
     }
@@ -100,6 +102,25 @@ async def get_tournament(tournament_id: str) -> dict[str, Any] | None:
     database = get_db()
     doc = await database.tournaments.find_one({"tournament_id": tournament_id})
     return _transform_doc(doc)
+
+async def get_pending_reminders(minutes_before: int = 30) -> list[dict[str, Any]]:
+    database = get_db()
+    now = utc_now()
+    threshold = now + timedelta(minutes=minutes_before)
+    cursor = database.tournaments.find({
+        "status": "planned",
+        "reminder_sent": False,
+        "scheduled_for": {"$gt": now, "$lte": threshold}
+    })
+    return [_transform_doc(doc) for doc in await cursor.to_list(length=100)]
+
+async def get_started_tournaments() -> list[dict[str, Any]]:
+    database = get_db()
+    cursor = database.tournaments.find({
+        "status": "started",
+        "results_fetched": False
+    })
+    return [_transform_doc(doc) for doc in await cursor.to_list(length=100)]
 
 async def link_user(discord_id: str, chesscom_username: str) -> None:
     database = get_db()
@@ -150,7 +171,8 @@ async def update_tournament(tournament_id: str, fields: dict[str, Any]) -> dict[
     allowed = {
         "name", "chesscom_link", "format", "rated", "status",
         "scheduled_for", "started_at", "finished_at",
-        "winner", "runner_up", "third_place", "notes"
+        "winner", "runner_up", "third_place", "notes",
+        "reminder_sent", "results_fetched"
     }
     
     update_data = {k: v for k, v in fields.items() if k in allowed}

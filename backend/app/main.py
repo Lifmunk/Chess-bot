@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from . import db
 from .config import get_settings
 from .discord_bot import build_bot
+from .services.chesscom import fetch_tournament_results
 from .schemas import (
     LoginRequest,
     MeResponse,
@@ -83,6 +84,37 @@ class DiscordBridge:
         if await self._wait_for_ready():
             await self.bot.announce_tournament_results(tournament)
 
+    async def announce_reminder(self, tournament: dict, time_left: str) -> None:
+        if await self._wait_for_ready():
+            await self.bot.announce_tournament_reminder(tournament, time_left)
+
+    async def check_reminders(self) -> None:
+        pending = await db.get_pending_reminders(minutes_before=30)
+        for t in pending:
+            logging.info("Sending reminder for tournament %s", t["tournament_id"])
+            await self.announce_reminder(t, "30 minutes")
+            await db.update_tournament(t["tournament_id"], {"reminder_sent": True})
+
+    async def check_tournament_results(self) -> None:
+        started = await db.get_started_tournaments()
+        for t in started:
+            results = await fetch_tournament_results(t["chesscom_link"])
+            if results:
+                logging.info("Fetched results for tournament %s", t["tournament_id"])
+                updated = await db.update_tournament(
+                    t["tournament_id"],
+                    {
+                        "status": "finished",
+                        "results_fetched": True,
+                        "winner": results["winner"],
+                        "runner_up": results["runner_up"],
+                        "third_place": results["third_place"],
+                        "finished_at": results["finished_at"],
+                    },
+                )
+                if updated:
+                    await self.announce_finished(updated)
+
     async def check_automated_starts(self) -> None:
         pending = await db.get_pending_automated_starts()
         for t in pending:
@@ -130,6 +162,8 @@ async def automation_loop():
     while True:
         try:
             await discord_bridge.check_automated_starts()
+            await discord_bridge.check_reminders()
+            await discord_bridge.check_tournament_results()
         except Exception:
             logging.exception("Error in automation loop")
         await asyncio.sleep(60)

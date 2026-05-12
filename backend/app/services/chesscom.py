@@ -90,3 +90,46 @@ def build_stats_summary(data: ChessComStats) -> dict[str, str]:
         summary["Puzzles"] = f"Best: {stats['puzzles'].get('highest', {}).get('rating', 'unknown')}"
 
     return summary
+
+
+async def fetch_tournament_results(tournament_url: str) -> dict[str, Any] | None:
+    """
+    Attempts to fetch tournament results from Chess.com.
+    Expects a URL like https://www.chess.com/tournament/live/-tc-20230512-abcd
+    """
+    if "chess.com/tournament/live/" not in tournament_url:
+        return None
+
+    try:
+        url_id = tournament_url.split("tournament/live/")[-1].split("/")[0].split("?")[0]
+        api_url = f"https://api.chess.com/pub/tournament/{url_id}"
+        
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            resp = await client.get(api_url)
+            if resp.status_code != 200:
+                return None
+            
+            data = resp.json()
+            if data.get("status") != "finished":
+                return None
+            
+            # Fetch results
+            results_resp = await client.get(f"{api_url}/results")
+            if results_resp.status_code != 200:
+                return None
+            
+            results = results_resp.json().get("players", [])
+            if not results:
+                return None
+            
+            # Sort by rank
+            results.sort(key=lambda x: x.get("rank", 999))
+            
+            return {
+                "winner": results[0].get("username") if len(results) > 0 else None,
+                "runner_up": results[1].get("username") if len(results) > 1 else None,
+                "third_place": results[2].get("username") if len(results) > 2 else None,
+                "finished_at": datetime.now(timezone.utc)
+            }
+    except Exception:
+        return None

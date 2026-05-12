@@ -28,31 +28,29 @@ A full-stack application for managing a chess club's activities, featuring a Fas
 1. Configure `backend/.env` and `frontend/.env`.
 2. Run `docker compose up --build`.
 
-### Manual Backend Setup
-1. `cd backend`
-2. `python -m venv venv`
-3. `source venv/bin/activate` (or `venv\Scripts\activate` on Windows)
-4. `pip install -r requirements.txt`
-5. `cp .env.example .env` (and configure variables)
-6. `uvicorn app.main:app --reload --port 8000`
+### Deployment
 
-### Frontend Setup
-1. `cd frontend`
-2. `npm install`
-3. `cp .env.example .env` (set `VITE_API_BASE_URL=http://localhost:8000`)
-4. `npm run dev`
+#### Backend (Render)
+1. Create a new "Blueprint" on Render and connect this repository.
+2. Render will use the `render.yaml` file to set up the backend service.
+3. Ensure you configure the `GROQ_API_KEY` and `DISCORD_BOT_TOKEN` in the Render environment variables or Secret Group.
+4. The backend is configured to run via Docker for consistency.
 
-### Testing
-- No automated tests currently exist.
+#### Frontend (Vercel)
+1. Create a new project on Vercel and connect this repository.
+2. Set the **Root Directory** to `frontend`.
+3. Configure the following environment variable:
+   - `VITE_API_BASE_URL`: The URL of your deployed Render backend (e.g., `https://chess-club-backend.onrender.com`).
+4. Vercel will automatically detect Vite and deploy the admin panel.
 
-## Development Conventions
+## Bot Features & Slash Commands
 
 ### Backend
 - **Type Safety:** Use Python type hints throughout the application.
 - **Schema Management:** Use Pydantic models (`app/schemas.py`) for request/response validation.
-- **Database Access:** Direct SQLite queries via `app/db.py`. Use `sqlite3.Row` for dictionary-like access.
+- **Database Access:** Asynchronous MongoDB access via `motor` in `app/db.py`.
 - **Configuration:** Managed via `pydantic-settings` in `app/config.py`.
-- **Async:** Leverage `async`/`await` for I/O bound operations (API, Discord, HTTPX).
+- **Async:** Leverage `async`/`await` for I/O bound operations (API, Discord, HTTPX, MongoDB).
 
 ### Frontend
 - **State:** Use React hooks (`useState`, `useEffect`, `useMemo`).
@@ -69,7 +67,8 @@ A full-stack application for managing a chess club's activities, featuring a Fas
 ## Bot Features & Slash Commands
 The bot registers several slash commands for community engagement:
 - `/link <username>`: Links your Chess.com username and assigns the **Verified** role.
-- `/puzzle`: Posts the current Lichess puzzle.
+- `/puzzle`: Posts the current Lichess puzzle with high-quality rendering.
+- `/ask <question>`: Ask the AI Grandmaster anything and get a funny, chess-themed response.
 - `/leaderboard`: Displays top club players by wins.
 - `/next`: Shows details for the next scheduled tournament.
 - `/trigger_puzzle` (Admin only): Manually triggers a daily puzzle post.
@@ -77,12 +76,17 @@ The bot registers several slash commands for community engagement:
 
 ### Advanced Features
 - **Automation Engine:**
-  - **Auto-Start:** Tournaments can be set to automatically start and announce in Discord at their scheduled time.
-  - **Recurrence:** Support for daily, weekly, and monthly recurring tournaments. When a recurring tournament starts, the next one is automatically scheduled.
-- **Automated Pings:** When a tournament winner is announced in the admin panel, the bot automatically pings the winner if they have linked their account.
-- **Data Management:** A "Nuke" feature in the admin panel allows for a complete reset of all tournament and user data.
-- **Dedicated Channels:** Tournament results can now be directed to a separate channel via `DISCORD_RESULTS_CHANNEL_ID`.
+  - **Auto-Start:** Tournaments automatically start and announce in Discord at their scheduled time.
+  - **Auto-Results:** The bot automatically polls Chess.com for finished tournaments, fetches winners, updates the leaderboard, and announces results.
+  - **Reminders:** Automatically pings the community 30 minutes before a tournament starts.
+  - **Recurrence:** Support for daily, weekly, and monthly recurring tournaments.
+- **Improved Puzzle System:**
+  - Automated daily posts at a configurable time.
+  - Custom high-quality board rendering with last-move highlights and game details.
+- **AI Integration:**
+  - Powered by Groq (LLAMA 3) for dynamic announcements and interactive commands.
+- **Automated Pings:** When a tournament winner is announced (manually or automatically), the bot pings the winner if their account is linked.
 - **Role Management:**
   - **Verified Role:** Automatically assigned upon using `/link`.
-  - **Champion Role:** Automatically assigned to the winner of a tournament if their account is linked.
-- **Rich Embeds:** All tournament announcements (creation, start, results) use professional Discord embeds with timestamps and clear call-to-actions.
+  - **Champion Role:** Automatically assigned to tournament winners.
+- **Rich Embeds:** Professional Discord embeds with timestamps and clear call-to-actions.

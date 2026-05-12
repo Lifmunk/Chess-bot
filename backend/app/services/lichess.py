@@ -13,29 +13,30 @@ from PIL import Image, ImageDraw, ImageFont
 
 LICHESS_DAILY_PUZZLE_URL = "https://lichess.org/api/puzzle/daily"
 
-BOARD_SIZE = 960
-MARGIN = 48
-INFO_PANEL_HEIGHT = 260
-LIGHT_SQUARE = "#f0d9b5"
-DARK_SQUARE = "#b58863"
-HIGHLIGHT = "#8ecae6"
-HIGHLIGHT_SECONDARY = "#ffb703"
-TEXT = "#181818"
-SUBTLE_TEXT = "#5f5f5f"
+BOARD_SIZE = 800
+MARGIN = 60
+INFO_PANEL_HEIGHT = 220
+LIGHT_SQUARE = "#dee3e6"
+DARK_SQUARE = "#8ca2ad"
+HIGHLIGHT = "#bbc91c"  # Classic Lichess green highlight
+HIGHLIGHT_SECONDARY = "#f5f682"
+TEXT = "#262421"
+SUBTLE_TEXT = "#6b6b6b"
+BOARD_BORDER = "#403d39"
 
 PIECE_GLYPHS = {
-    (chess.PAWN, chess.WHITE): "♙",
-    (chess.KNIGHT, chess.WHITE): "♘",
-    (chess.BISHOP, chess.WHITE): "♗",
-    (chess.ROOK, chess.WHITE): "♖",
-    (chess.QUEEN, chess.WHITE): "♕",
-    (chess.KING, chess.WHITE): "♔",
-    (chess.PAWN, chess.BLACK): "♟",
-    (chess.KNIGHT, chess.BLACK): "♞",
-    (chess.BISHOP, chess.BLACK): "♝",
-    (chess.ROOK, chess.BLACK): "♜",
-    (chess.QUEEN, chess.BLACK): "♛",
-    (chess.KING, chess.BLACK): "♚",
+    (chess.PAWN, chess.WHITE): "P",
+    (chess.KNIGHT, chess.WHITE): "N",
+    (chess.BISHOP, chess.WHITE): "B",
+    (chess.ROOK, chess.WHITE): "R",
+    (chess.QUEEN, chess.WHITE): "Q",
+    (chess.KING, chess.WHITE): "K",
+    (chess.PAWN, chess.BLACK): "p",
+    (chess.KNIGHT, chess.BLACK): "n",
+    (chess.BISHOP, chess.BLACK): "b",
+    (chess.ROOK, chess.BLACK): "r",
+    (chess.QUEEN, chess.BLACK): "q",
+    (chess.KING, chess.BLACK): "k",
 }
 
 
@@ -114,19 +115,25 @@ def _piece_key(piece: chess.Piece) -> tuple[int, bool]:
 
 
 def render_puzzle_jpg(puzzle: PuzzleData) -> Path:
-    image = Image.new("RGB", (BOARD_SIZE + MARGIN * 2, BOARD_SIZE + INFO_PANEL_HEIGHT + MARGIN * 2), "#f7f3eb")
+    image = Image.new("RGB", (BOARD_SIZE + MARGIN * 2, BOARD_SIZE + INFO_PANEL_HEIGHT + MARGIN * 2 + 100), "#fdfaf5")
     draw = ImageDraw.Draw(image)
 
-    title_font = _load_font(38, bold=True)
-    body_font = _load_font(26)
-    small_font = _load_font(22)
-    piece_font = _load_font(52, bold=True)
-    coord_font = _load_font(18)
+    title_font = _load_font(42, bold=True)
+    body_font = _load_font(28)
+    small_font = _load_font(24)
+    piece_font = _load_font(60, bold=True)
+    coord_font = _load_font(20, bold=True)
 
     board = puzzle.board
     square_size = BOARD_SIZE // 8
     board_left = MARGIN
-    board_top = MARGIN + 96
+    board_top = MARGIN + 120
+
+    # Draw a border around the board
+    draw.rectangle(
+        (board_left - 4, board_top - 4, board_left + BOARD_SIZE + 4, board_top + BOARD_SIZE + 4),
+        fill=BOARD_BORDER
+    )
 
     last_move = None
     try:
@@ -151,10 +158,10 @@ def render_puzzle_jpg(puzzle: PuzzleData) -> Path:
         return board_left + x_index * square_size, board_top + y_index * square_size
 
     # Header
-    draw.text((MARGIN, 22), "Lichess daily puzzle", fill=TEXT, font=title_font)
+    draw.text((MARGIN, 30), "Lichess Daily Puzzle", fill=TEXT, font=title_font)
     header_right = BOARD_SIZE + MARGIN * 2
-    draw.text((header_right - 320, 30), f"Puzzle #{puzzle.puzzle_id}", fill=SUBTLE_TEXT, font=small_font)
-    draw.text((MARGIN, 68), f"{puzzle.perf_name}  •  Rated { 'yes' if puzzle.rated else 'no' }  •  Clock {puzzle.clock}", fill=SUBTLE_TEXT, font=small_font)
+    draw.text((header_right - MARGIN - 250, 40), f"#{puzzle.puzzle_id}", fill=SUBTLE_TEXT, font=body_font)
+    draw.text((MARGIN, 85), f"{puzzle.perf_name}  •  Rating {puzzle.rating}", fill=SUBTLE_TEXT, font=small_font)
 
     # Board squares and coordinates
     for rank in range(8):
@@ -163,77 +170,78 @@ def render_puzzle_jpg(puzzle: PuzzleData) -> Path:
                 square = chess.square(file, 7 - rank)
             else:
                 square = chess.square(7 - file, rank)
+            
             x0 = board_left + file * square_size
             y0 = board_top + rank * square_size
             x1 = x0 + square_size
             y1 = y0 + square_size
+            
             color = LIGHT_SQUARE if (file + rank) % 2 == 0 else DARK_SQUARE
-            draw.rectangle((x0, y0, x1, y1), fill=color)
+            
+            # Highlight last move
             if square in highlight_squares:
-                overlay = HIGHLIGHT if square == getattr(last_move, "to_square", None) else HIGHLIGHT_SECONDARY
-                draw.rectangle((x0, y0, x1, y1), outline=overlay, width=8)
+                color = HIGHLIGHT if (file + rank) % 2 != 0 else HIGHLIGHT_SECONDARY
+
+            draw.rectangle((x0, y0, x1, y1), fill=color)
+            
             piece = board.piece_at(square)
             if piece:
                 glyph = PIECE_GLYPHS[_piece_key(piece)]
+                fill = "#ffffff" if piece.color == chess.WHITE else "#000000"
+                stroke = "#000000" if piece.color == chess.WHITE else "#ffffff"
+                
                 text_bbox = draw.textbbox((0, 0), glyph, font=piece_font)
                 text_width = text_bbox[2] - text_bbox[0]
                 text_height = text_bbox[3] - text_bbox[1]
+                
                 text_x = x0 + (square_size - text_width) / 2
-                text_y = y0 + (square_size - text_height) / 2 - 10
-                fill = "#f5f5f5" if piece.color == chess.WHITE else "#222222"
-                stroke = "#111111" if piece.color == chess.WHITE else "#f9f9f9"
+                text_y = y0 + (square_size - text_height) / 2 - 5
+                
                 draw.text(
                     (text_x, text_y),
                     glyph,
                     fill=fill,
                     font=piece_font,
-                    stroke_width=1,
-                    stroke_fill=stroke,
+                    stroke_width=2,
+                    stroke_fill=stroke
                 )
 
+            # Coordinates
             if file == 0:
                 rank_label = str(8 - rank) if board.turn == chess.WHITE else str(rank + 1)
-                draw.text((board_left - 24, y0 + 10), rank_label, fill=SUBTLE_TEXT, font=coord_font)
+                draw.text((board_left - 30, y0 + square_size // 2 - 10), rank_label, fill=TEXT, font=coord_font)
             if rank == 7:
                 file_label = chr(ord("a") + file) if board.turn == chess.WHITE else chr(ord("h") - file)
-                draw.text((x0 + square_size - 16, board_top + BOARD_SIZE + 8), file_label, fill=SUBTLE_TEXT, font=coord_font)
+                draw.text((x0 + square_size // 2 - 5, board_top + BOARD_SIZE + 10), file_label, fill=TEXT, font=coord_font)
 
     # Info panel
-    info_top = board_top + BOARD_SIZE + 22
+    info_top = board_top + BOARD_SIZE + 60
     draw.rounded_rectangle(
-        (MARGIN, info_top, BOARD_SIZE + MARGIN, info_top + INFO_PANEL_HEIGHT - 18),
-        radius=24,
+        (MARGIN, info_top, BOARD_SIZE + MARGIN, info_top + INFO_PANEL_HEIGHT),
+        radius=15,
         fill="#ffffff",
-        outline="#e6dfd3",
-        width=2,
+        outline="#d0d0d0",
+        width=1,
     )
 
-    info_x = MARGIN + 28
-    info_y = info_top + 22
-    draw.text((info_x, info_y), f"Puzzle ID: {puzzle.puzzle_id}", fill=TEXT, font=body_font)
-    info_y += 38
-    draw.text((info_x, info_y), f"Rating: {puzzle.rating or 'unknown'}", fill=TEXT, font=body_font)
-    info_y += 36
-    draw.text((info_x, info_y), f"Played in: {puzzle.plays or 'unknown'} games", fill=TEXT, font=body_font)
-    info_y += 36
-    draw.text((info_x, info_y), f"Themes: {puzzle.theme_text or 'mixed'}", fill=TEXT, font=body_font)
+    info_x = MARGIN + 30
+    info_y = info_top + 25
+    draw.text((info_x, info_y), f"Goal: Find the best move for {'White' if board.turn == chess.WHITE else 'Black'}", fill=TEXT, font=body_font)
+    
     info_y += 50
-
+    draw.text((info_x, info_y), f"Themes: {puzzle.theme_text or 'chess strategy'}", fill=SUBTLE_TEXT, font=small_font)
+    
+    info_y += 40
     if puzzle.player_lines:
-        draw.text((info_x, info_y), "Game details", fill=TEXT, font=body_font)
-        info_y += 34
-        for line in puzzle.player_lines[:2]:
-            draw.text((info_x, info_y), line, fill=SUBTLE_TEXT, font=small_font)
-            info_y += 28
-        info_y += 6
+        player_info = " vs ".join([p.split(": ")[1] for p in puzzle.player_lines[:2]])
+        draw.text((info_x, info_y), f"Game: {player_info}", fill=SUBTLE_TEXT, font=small_font)
 
-    hint = puzzle.opening_hint
-    if hint:
-        draw.text((info_x, info_y), f"Opening hint: {hint}", fill=SUBTLE_TEXT, font=small_font)
+    info_y += 40
+    draw.text((info_x, info_y), "Reply with your solution!", fill="#1a73e8", font=small_font)
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
     try:
-        image.save(tmp.name, format="JPEG", quality=92, optimize=True)
+        image.save(tmp.name, format="JPEG", quality=95, optimize=True)
     finally:
         tmp.close()
     return Path(tmp.name)

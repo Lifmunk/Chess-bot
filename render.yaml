@@ -2,9 +2,11 @@ services:
   # Backend API + Bot
   - type: web
     name: chess-club-backend
-    env: python
-    buildCommand: pip install -r backend/requirements.txt
-    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    env: docker
+    dockerContext: backend
+    dockerfilePath: Dockerfile
+    plan: free
+    region: oregon
     envVars:
       - key: MONGODB_URI
         sync: false
@@ -15,6 +17,8 @@ services:
       - key: ADMIN_TOKEN_SECRET
         sync: false
       - key: GROQ_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
         sync: false
       - fromGroup: chess-club-secrets
 

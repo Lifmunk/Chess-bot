@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     mongodb_uri: str = "mongodb://localhost:27017"
     mongodb_db_name: str = "chessclub"
     groq_api_key: str = ""
-    cors_origins: str = "http://localhost:5173"
+    cors_origins: str = ""
 
     discord_bot_token: str = ""
     discord_guild_id: int = 0
@@ -28,8 +28,8 @@ class Settings(BaseSettings):
     daily_puzzle_hour_utc: int = 12
     daily_puzzle_minute_utc: int = 0
 
-    frontend_url: str = "http://localhost:5173"
-    backend_public_url: str = "http://localhost:8000"
+    frontend_url: str = ""
+    backend_public_url: str = ""
 
     @property
     def cors_origin_list(self) -> list[str]:

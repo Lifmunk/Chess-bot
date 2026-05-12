@@ -38,6 +38,12 @@ class GroqService:
             "reminder": (
                 f"Generate a friendly reminder for the upcoming chess tournament '{context.get('name')}'. "
                 f"It starts in {context.get('time_left')}. Link: {context.get('chesscom_link')}."
+            ),
+            "funny_ask": (
+                f"The user asked: '{context.get('question')}'. "
+                "Reply in a very funny, sarcastic, and slightly obsessive chess-player personality. "
+                "Use chess metaphors for everything. Be witty and entertaining. "
+                "Keep it very short, punchy, and hilarious. Maximum 2-3 sentences."
             )
         }
 
@@ -50,16 +56,19 @@ class GroqService:
             completion = self.client.chat.completions.create(
                 model="llama-3.3-70b-versatile", # Using a common Groq model
                 messages=[
-                    {"role": "system", "content": "You are a helpful and enthusiastic Chess Club assistant for a Discord server."},
+                    {"role": "system", "content": "You are a hilarious, chess-obsessed Grandmaster who sees the world through 64 squares. You are sarcastic, witty, and always relate everything back to chess theory."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
-                max_tokens=500,
+                temperature=0.9,
+                max_tokens=150,
             )
             return completion.choices[0].message.content
         except Exception as e:
             logger.error("Error generating AI message: %s", e)
             return self._fallback_message(prompt_type, context)
+
+    async def ask_funny_question(self, question: str) -> str:
+        return await self.generate_message("funny_ask", {"question": question})
 
     def _fallback_message(self, prompt_type: str, context: dict[str, Any]) -> str:
         if prompt_type == "tournament_created":
