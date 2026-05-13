@@ -59,8 +59,9 @@ A powerful, full-stack management suite for chess clubs. This project combines a
 3. Configure the environment variables (see `backend/.env.example`):
    - `DISCORD_BOT_TOKEN`: From [Discord Developer Portal](https://discord.com/developers/applications).
    - `GROQ_API_KEY`: From [Groq Console](https://console.groq.com/).
-   - `DISCORD_GUILD_ID`, `DISCORD_ANNOUNCEMENT_CHANNEL_ID`, etc.
+   - `MONGODB_URI`: Your connection string.
    - `ADMIN_PASSWORD`: Your secret dashboard password.
+4. **Note**: Roles, Channels, and Club settings are now managed in the **Settings** tab of the Admin Dashboard.
 
 ### 3. Frontend Deployment (Vercel)
 1. Create a new project on Vercel.

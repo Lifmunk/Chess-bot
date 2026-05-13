@@ -27,12 +27,22 @@ class ChessClubBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
         self.settings = settings
         self._ready_event = asyncio.Event()
+        self.dynamic_settings: dict[str, Any] = {}
+
+    async def refresh_settings(self) -> None:
+        self.dynamic_settings = await db.get_app_settings()
+        logger.info("Dynamic settings refreshed: %s", self.dynamic_settings)
 
     async def setup_hook(self) -> None:
-        if self.settings.discord_guild_id:
-            guild = discord.Object(id=self.settings.discord_guild_id)
-            self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
+        await self.refresh_settings()
+        guild_id = self.dynamic_settings.get("discord_guild_id")
+        if guild_id:
+            try:
+                guild = discord.Object(id=int(guild_id))
+                self.tree.copy_global_to(guild=guild)
+                await self.tree.sync(guild=guild)
+            except Exception as e:
+                logger.warning("Failed to sync commands to guild %s: %s", guild_id, e)
         else:
             await self.tree.sync()
         self.daily_puzzle_loop.start()
@@ -45,18 +55,19 @@ class ChessClubBot(commands.Bot):
         await self._ready_event.wait()
 
     def announcement_mention(self) -> str:
-        if self.settings.discord_players_role_id:
-            return f"<@&{self.settings.discord_players_role_id}>"
+        role_id = self.dynamic_settings.get("discord_players_role_id")
+        if role_id:
+            return f"<@&{role_id}>"
         return "@players"
 
     def announcement_channel_id(self) -> int:
-        return self.settings.discord_announcement_channel_id or self.settings.discord_puzzle_channel_id
+        return int(self.dynamic_settings.get("discord_announcement_channel_id") or self.dynamic_settings.get("discord_puzzle_channel_id") or 0)
 
     def results_channel_id(self) -> int:
-        return self.settings.discord_results_channel_id or self.announcement_channel_id()
+        return int(self.dynamic_settings.get("discord_results_channel_id") or self.announcement_channel_id())
 
     def puzzle_channel_id(self) -> int:
-        return self.settings.discord_puzzle_channel_id or self.settings.discord_announcement_channel_id
+        return int(self.dynamic_settings.get("discord_puzzle_channel_id") or self.announcement_channel_id())
 
     async def safe_send(self, channel_id: int, content: str | None = None, *, embed: discord.Embed | None = None, file: discord.File | None = None) -> None:
         if not channel_id:
@@ -144,14 +155,16 @@ class ChessClubBot(commands.Bot):
         )
 
         # Assign champion role if configured
-        if winner_username and self.settings.discord_champion_role_id and self.settings.discord_guild_id:
+        champion_role_id = self.dynamic_settings.get("discord_champion_role_id")
+        guild_id = self.dynamic_settings.get("discord_guild_id")
+        if winner_username and champion_role_id and guild_id:
             discord_id = await db.get_user_by_chesscom(winner_username)
             if discord_id:
-                guild = self.get_guild(self.settings.discord_guild_id)
+                guild = self.get_guild(int(guild_id))
                 if guild:
                     try:
                         member = guild.get_member(int(discord_id)) or await guild.fetch_member(int(discord_id))
-                        role = guild.get_role(self.settings.discord_champion_role_id)
+                        role = guild.get_role(int(champion_role_id))
                         if member and role:
                             await member.add_roles(role)
                             logger.info("Assigned Champion role to %s", member.display_name)
@@ -240,14 +253,30 @@ def build_bot(settings: Settings) -> ChessClubBot:
     @bot.tree.command(name="link", description="Link your Chess.com username to your Discord account")
     @app_commands.describe(username="Your Chess.com username")
     async def link_command(interaction: discord.Interaction, username: str) -> None:
+        await interaction.response.defer(ephemeral=True)
+        
+        # Check if user is in club
+        from .services.chesscom import is_player_in_club
+        club_id = bot.dynamic_settings.get("chesscom_club_id")
+        in_club = await is_player_in_club(username, club_id)
+        
+        if not in_club:
+            await interaction.followup.send(
+                f"I couldn't find `{username}` in our Chess.com club. Please join the club first!", 
+                ephemeral=True
+            )
+            return
+
         await db.link_user(str(interaction.user.id), username)
 
         role_added = False
-        if bot.settings.discord_verified_role_id and bot.settings.discord_guild_id:
-            guild = bot.get_guild(bot.settings.discord_guild_id)
+        verified_role_id = bot.dynamic_settings.get("discord_verified_role_id")
+        guild_id = bot.dynamic_settings.get("discord_guild_id")
+        if verified_role_id and guild_id:
+            guild = bot.get_guild(int(guild_id))
             if guild:
                 member = interaction.user
-                role = guild.get_role(bot.settings.discord_verified_role_id)
+                role = guild.get_role(int(verified_role_id))
                 if role:
                     try:
                         await member.add_roles(role)
@@ -261,7 +290,7 @@ def build_bot(settings: Settings) -> ChessClubBot:
         if role_added:
             msg += ". The verified role has been assigned."
 
-        await interaction.response.send_message(msg, ephemeral=True)
+        await interaction.followup.send(msg, ephemeral=True)
 
     @bot.tree.command(name="stats", description="Show Chess.com stats for a player")
     @app_commands.describe(username="Chess.com username. Leave blank to use your linked account.")

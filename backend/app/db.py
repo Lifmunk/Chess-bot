@@ -50,6 +50,7 @@ async def init_db() -> None:
         await db.tournaments.create_index("tournament_id", unique=True)
         await db.users.create_index("discord_id", unique=True)
         await db.users.create_index("chesscom_username", unique=True)
+        await db.announcements.create_index("announcement_id", unique=True)
         logging.info("MongoDB connection established and indexes created.")
     except Exception as e:
         logging.error(f"Failed to initialize MongoDB: {e}")
@@ -82,12 +83,16 @@ async def nuke_database() -> None:
     database = get_db()
     await database.tournaments.delete_many({})
     await database.users.delete_many({})
+    await database.announcements.delete_many({})
     logging.info("Database nuked.")
 
 def generate_tournament_id() -> str:
     stamp = utc_now().strftime("%Y%m%d")
     suffix = token_hex(2).upper()
     return f"TC-{stamp}-{suffix}"
+
+def generate_announcement_id() -> str:
+    return f"ANN-{token_hex(4).upper()}"
 
 def _transform_doc(doc: dict[str, Any] | None) -> dict[str, Any] | None:
     if doc is None:
@@ -257,3 +262,71 @@ async def get_next_tournament() -> dict[str, Any] | None:
         sort=[("scheduled_for", 1)]
     )
     return _transform_doc(doc)
+
+# Announcements
+async def create_announcement(payload: dict[str, Any]) -> dict[str, Any]:
+    database = get_db()
+    now = utc_now()
+    doc = {
+        "announcement_id": generate_announcement_id(),
+        "channel_id": payload["channel_id"],
+        "message": payload["message"],
+        "scheduled_for": parse_dt(payload["scheduled_for"]),
+        "sent": False,
+        "created_at": now,
+    }
+    await database.announcements.insert_one(doc)
+    return _transform_doc(doc)
+
+async def list_announcements(sent: bool | None = None) -> list[dict[str, Any]]:
+    database = get_db()
+    query = {}
+    if sent is not None:
+        query["sent"] = sent
+    cursor = database.announcements.find(query).sort("scheduled_for", 1)
+    return [_transform_doc(doc) for doc in await cursor.to_list(length=100)]
+
+async def get_pending_announcements() -> list[dict[str, Any]]:
+    database = get_db()
+    now = utc_now()
+    cursor = database.announcements.find({
+        "sent": False,
+        "scheduled_for": {"$lte": now}
+    })
+    return [_transform_doc(doc) for doc in await cursor.to_list(length=100)]
+
+async def update_announcement(announcement_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
+    database = get_db()
+    allowed = {"channel_id", "message", "scheduled_for", "sent"}
+    update_data = {k: v for k, v in fields.items() if k in allowed}
+    if "scheduled_for" in update_data:
+        update_data["scheduled_for"] = parse_dt(update_data["scheduled_for"])
+    
+    await database.announcements.update_one(
+        {"announcement_id": announcement_id},
+        {"$set": update_data}
+    )
+    doc = await database.announcements.find_one({"announcement_id": announcement_id})
+    return _transform_doc(doc)
+
+async def delete_announcement(announcement_id: str) -> bool:
+    database = get_db()
+    res = await database.announcements.delete_one({"announcement_id": announcement_id})
+    return res.deleted_count > 0
+
+# Dynamic Settings
+async def get_app_settings() -> dict[str, Any]:
+    database = get_db()
+    doc = await database.settings.find_one({"_id": "app_config"})
+    if not doc:
+        return {}
+    return doc.get("values", {})
+
+async def update_app_settings(values: dict[str, Any]) -> dict[str, Any]:
+    database = get_db()
+    await database.settings.update_one(
+        {"_id": "app_config"},
+        {"$set": {"values": values}},
+        upsert=True
+    )
+    return await get_app_settings()

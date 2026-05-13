@@ -19,13 +19,6 @@ class Settings(BaseSettings):
     cors_origins: str = ""
 
     discord_bot_token: str = ""
-    discord_guild_id: int = 0
-    discord_announcement_channel_id: int = 0
-    discord_results_channel_id: int = 0
-    discord_puzzle_channel_id: int = 0
-    discord_players_role_id: int = 0
-    discord_verified_role_id: int = 0
-    discord_champion_role_id: int = 0
     daily_puzzle_hour_utc: int = 12
     daily_puzzle_minute_utc: int = 0
 

@@ -92,6 +92,28 @@ def build_stats_summary(data: ChessComStats) -> dict[str, str]:
     return summary
 
 
+async def is_player_in_club(username: str, club_id: str) -> bool:
+    if not club_id:
+        return True  # If no club ID is configured, skip the check
+    
+    url = f"https://api.chess.com/pub/club/{club_id}/members"
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                return False
+            
+            members = resp.json()
+            # Members are grouped by 'all_time', 'weekly', 'monthly'
+            for category in ["all_time", "weekly", "monthly"]:
+                for member in members.get(category, []):
+                    if member.get("username", "").lower() == username.lower():
+                        return True
+            return False
+    except Exception:
+        return False
+
+
 async def fetch_tournament_results(tournament_url: str) -> dict[str, Any] | None:
     """
     Attempts to fetch tournament results from Chess.com.

@@ -94,5 +94,31 @@ class UserListResponse(BaseModel):
     items: list[UserOut]
 
 
+class AnnouncementRequest(BaseModel):
+    channel_id: str = Field(min_length=1)
+    message: str = Field(min_length=1, max_length=2000)
+
+
+class AnnouncementCreate(BaseModel):
+    channel_id: str = Field(min_length=1)
+    message: str = Field(min_length=1, max_length=2000)
+    scheduled_for: datetime
+
+
+class AnnouncementUpdate(BaseModel):
+    channel_id: Optional[str] = Field(None, min_length=1)
+    message: Optional[str] = Field(None, min_length=1, max_length=2000)
+    scheduled_for: Optional[datetime] = None
+
+
+class AnnouncementOut(BaseModel):
+    announcement_id: str
+    channel_id: str
+    message: str
+    scheduled_for: datetime
+    sent: bool
+    created_at: datetime
+
+
 class MessageResponse(BaseModel):
     detail: str

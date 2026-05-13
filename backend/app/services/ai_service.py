@@ -12,50 +12,52 @@ logger = logging.getLogger(__name__)
 class GroqService:
     def __init__(self):
         self.client = None
+
         if settings.groq_api_key:
             self.client = AsyncGroq(api_key=settings.groq_api_key)
         else:
-            logger.warning("GROQ_API_KEY not set. AI features will be disabled.")
+            logger.warning("GROQ_API_KEY not set. AI features disabled.")
 
     async def generate_message(self, prompt_type: str, context: dict[str, Any]) -> str:
         if not self.client:
             return self._fallback_message(prompt_type, context)
-        
-        # prompts dictionary reflects Sarmak's Martian perspective
+
         prompts = {
             "tournament_created": (
-                f"As Grandmaster Sarmak of Mars, announce a new interplanetary-standard chess tournament: '{context.get('name')}'. "
-                f"Format: {context.get('format')}. Rated: {context.get('rated')}. "
-                f"Time Control: {context.get('time_control')}. "
-                f"Rules: {context.get('rules') or 'Martian-Earth Unified Rules'}. "
-                f"Description: {context.get('description') or 'A test of strategic excellence across the red sands.'}. "
-                f"Scheduled start: {context.get('scheduled_for')}. "
-                f"Tournament Link: {context.get('chesscom_link')}. "
-                "Be polite, professional, and welcoming to all Earthian and Martian players. Use Discord markdown."
+                f"Write a short and welcoming Discord announcement for a newly created chess tournament called "
+                f"'{context.get('name')}'. "
+                "Do not repeat technical tournament details like format, rules, or time control because they are already displayed automatically. "
+                "Focus on excitement, participation, and community energy. "
+                "Keep it professional, natural, and concise. Maximum 3 short paragraphs."
             ),
             "tournament_started": (
-                f"As GM Sarmak, announce that the clocks have started for '{context.get('name')}'. "
-                f"Link: {context.get('chesscom_link')}. Invite all competitors to take their seats at the board with Martian discipline."
+                f"Write a short Discord announcement that the tournament '{context.get('name')}' has started. "
+                "Encourage players to join their games and wish everyone good luck. "
+                "Keep it clean, energetic, and professional."
             ),
             "tournament_finished": (
-                f"As GM Sarmak, offer professional congratulations to the victors of '{context.get('name')}'. "
-                f"Winner: {context.get('winner')}. Runner-up: {context.get('runner_up')}. Third: {context.get('third_place')}. "
-                "Commend their precision and tactical depth. Acknowledge their contribution to the sport's growth on both planets."
+                f"Write a professional closing announcement for the tournament '{context.get('name')}'. "
+                f"Mention the winner: {context.get('winner')}. "
+                f"Runner-up: {context.get('runner_up')}. "
+                "Congratulate all participants and encourage everyone to join future events. "
+                "Keep it respectful and concise."
             ),
             "reminder": (
-                f"As GM Sarmak, provide a polite reminder for the tournament '{context.get('name')}'. "
-                f"Commencement in {context.get('time_left')}. Link: {context.get('chesscom_link')}. "
-                "Advise players to begin their mental preparations."
+                f"Write a friendly reminder for the upcoming tournament '{context.get('name')}'. "
+                f"It begins in {context.get('time_left')}. "
+                "Keep the tone welcoming and motivating without sounding robotic."
             ),
             "funny_ask": (
-                f"The user asked: '{context.get('question')}'. "
-                "Respond as Sarmak, the polite Martian Grandmaster. You are knowledgeable, professional, and slightly curious about Earthian customs. "
-                "Mention your Martian heritage or the red planet if relevant, but stay respectful and focused on the wisdom of chess. "
-                "Keep it short and punchy. Maximum 2-3 sentences."
+                f"User question: '{context.get('question')}'. "
+                "Reply as Sarmak, a calm and intelligent chess grandmaster from Mars. "
+                "Keep responses witty, short, and natural. "
+                "Do not overuse Martian references."
             ),
         }
 
-        prompt = prompts.get(prompt_type, "Greetings from Sarmak, Grandmaster of Mars.")
+        prompt = prompts.get(
+            prompt_type, "Write a short professional chess community announcement."
+        )
 
         try:
             completion = await self.client.chat.completions.create(
@@ -64,33 +66,59 @@ class GroqService:
                     {
                         "role": "system",
                         "content": (
-                            "You are Sarmak, the first non-Earthian Grandmaster, hailing from the Valles Marineris region of Mars. "
-                            "You are exceptionally polite, professional, and poised. You represent the prestigious Martian Chess Academy. "
-                            "While you are a master of the 64 squares, you occasionally reference Martian culture, the thin atmosphere, "
-                            "or the red sands of your home planet. You view chess as a universal language that bridges the gap between Earth and Mars."
+                            "You are Sarmak, a respected chess grandmaster from Mars. "
+                            "Your personality is calm, intelligent, welcoming, and professional. "
+                            "You speak naturally like a modern community manager, not like a roleplay character. "
+                            "Martian references should be subtle and occasional, never forced. "
+                            "Avoid repeating structured tournament data already visible in embeds or bot UI. "
+                            "Keep announcements concise, readable, and Discord-friendly."
                         ),
                     },
-                    {"role": "user", "content": prompt},
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    },
                 ],
-                temperature=0.7,
-                max_tokens=150,
+                temperature=0.75,
+                max_tokens=120,
             )
-            return completion.choices[0].message.content
+
+            return completion.choices[0].message.content.strip()
+
         except Exception as e:
             logger.error("Error generating AI message: %s", e)
             return self._fallback_message(prompt_type, context)
 
     async def ask_funny_question(self, question: str) -> str:
-        return await self.generate_message("funny_ask", {"question": question})
+        return await self.generate_message(
+            "funny_ask",
+            {"question": question},
+        )
 
     def _fallback_message(self, prompt_type: str, context: dict[str, Any]) -> str:
+
         if prompt_type == "tournament_created":
-            return f"🔴 **Greetings from Sarmak.** A new tournament has been scheduled: {context.get('name')}\nFormat: {context.get('format')}\nLink: {context.get('chesscom_link')}"
+            return (
+                f"♟️ **{context.get('name')}** has been announced.\n"
+                "Registrations are now open. Good luck to everyone joining!"
+            )
+
         if prompt_type == "tournament_started":
-            return f"🚀 **The Tournament {context.get('name')} has COMMENCED.**\nSeats are available here: {context.get('chesscom_link')}"
+            return f"🚀 **{context.get('name')}** is now live.\nGood luck and have fun!"
+
         if prompt_type == "tournament_finished":
-            return f"🏁 **Tournament {context.get('name')} Concluded.**\nWinner: {context.get('winner')}. Well played by all."
-        return "A message from Grandmaster Sarmak."
+            return (
+                f"🏆 **{context.get('name')}** has concluded.\n"
+                f"Congratulations to **{context.get('winner')}** for the victory!"
+            )
+
+        if prompt_type == "reminder":
+            return (
+                f"⏰ Reminder: **{context.get('name')}** starts in "
+                f"{context.get('time_left')}."
+            )
+
+        return "♟️ A new message from Sarmak."
 
 
 ai_service = GroqService()

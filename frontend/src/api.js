@@ -81,6 +81,28 @@ export function unlinkUser(token, discordId) {
   return request(`/users/${discordId}`, { token, method: "DELETE" });
 }
 
+export function announce(token, payload) {
+  return request("/announce", { token, method: "POST", body: payload });
+}
+
+export function listAnnouncements(token, filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.sent !== undefined) params.set("sent", filters.sent);
+  return request(`/announcements${params.toString() ? `?${params}` : ""}`, { token });
+}
+
+export function scheduleAnnouncement(token, payload) {
+  return request("/announcements", { token, method: "POST", body: payload });
+}
+
+export function updateAnnouncement(token, id, payload) {
+  return request(`/announcements/${id}`, { token, method: "PATCH", body: payload });
+}
+
+export function deleteAnnouncement(token, id) {
+  return request(`/announcements/${id}`, { token, method: "DELETE" });
+}
+
 export function getTemplates(token) {
   return request("/templates", { token });
 }
@@ -91,6 +113,14 @@ export function getLeaderboard(token) {
 
 export function nuke(token) {
   return request("/nuke", { token, method: "POST" });
+}
+
+export function getSettings(token) {
+  return request("/settings", { token });
+}
+
+export function updateSettings(token, payload) {
+  return request("/settings", { token, method: "POST", body: payload });
 }
 
 export function getTest() {

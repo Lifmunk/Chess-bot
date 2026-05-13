@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import {
   createTournament,
   finishTournament,
@@ -14,6 +15,13 @@ import {
   getUsers,
   linkUser,
   unlinkUser,
+  announce,
+  listAnnouncements,
+  scheduleAnnouncement,
+  updateAnnouncement,
+  deleteAnnouncement,
+  getSettings,
+  updateSettings,
 } from "./api";
 
 const emptyForm = {
@@ -42,6 +50,13 @@ const emptyLinkUserForm = {
   chesscom_username: "",
 };
 
+const emptyAnnouncementForm = {
+  channel_id: "",
+  message: "",
+  scheduled_date: "",
+  scheduled_time: "",
+};
+
 function formatDate(value) {
   if (!value) return "Not set";
   const date = new Date(value);
@@ -59,11 +74,23 @@ function App() {
   const [tournaments, setTournaments] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
   const [users, setUsers] = useState([]);
+  const [announcements, setAnnouncements] = useState([]);
+  const [appSettings, setAppSettings] = useState({
+    discord_guild_id: "",
+    discord_announcement_channel_id: "",
+    discord_results_channel_id: "",
+    discord_puzzle_channel_id: "",
+    discord_players_role_id: "",
+    discord_verified_role_id: "",
+    discord_champion_role_id: "",
+    chesscom_club_id: "",
+  });
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [form, setForm] = useState(emptyForm);
   const [resultForm, setResultForm] = useState(emptyResultForm);
   const [linkUserForm, setLinkUserForm] = useState(emptyLinkUserForm);
+  const [announcementForm, setAnnouncementForm] = useState(emptyAnnouncementForm);
   const [selectedId, setSelectedId] = useState("");
   const [isEditing, setIsEditing] = useState(false);
   const [busyAction, setBusyAction] = useState("");
@@ -126,6 +153,26 @@ function App() {
     }
   };
 
+  const fetchAnnouncements = async () => {
+    if (!token || !user) return;
+    try {
+      const data = await listAnnouncements(token);
+      setAnnouncements(data || []);
+    } catch (err) {
+      console.error("Announcements fetch failed", err);
+    }
+  };
+
+  const fetchAppSettings = async () => {
+    if (!token || !user) return;
+    try {
+      const data = await getSettings(token);
+      setAppSettings(prev => ({ ...prev, ...data }));
+    } catch (err) {
+      console.error("Settings fetch failed", err);
+    }
+  };
+
   useEffect(() => {
     if (!token) {
       setAuthLoading(false);
@@ -157,6 +204,10 @@ function App() {
       fetchTournaments();
     } else if (activeTab === 'users') {
       fetchUsers();
+    } else if (activeTab === 'announce') {
+      fetchAnnouncements();
+    } else if (activeTab === 'settings') {
+      fetchAppSettings();
     }
   }, [token, user, activeTab, deferredQuery, statusFilter]);
 
@@ -294,6 +345,61 @@ function App() {
     }
   }
 
+  async function handleAnnounce(event) {
+    event.preventDefault();
+    setBusyAction("announce");
+    try {
+      if (announcementForm.scheduled_date && announcementForm.scheduled_time) {
+        const scheduled_for = new Date(`${announcementForm.scheduled_date}T${announcementForm.scheduled_time}`).toISOString();
+        await scheduleAnnouncement(token, {
+          channel_id: announcementForm.channel_id,
+          message: announcementForm.message,
+          scheduled_for
+        });
+        notify("Announcement scheduled");
+        await fetchAnnouncements();
+      } else {
+        await announce(token, {
+          channel_id: announcementForm.channel_id,
+          message: announcementForm.message,
+        });
+        notify("Announcement sent immediately");
+      }
+      setAnnouncementForm(emptyAnnouncementForm);
+    } catch (err) {
+      notify(err.message, "error");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleDeleteAnnouncement(id) {
+    if (!window.confirm("Delete this scheduled announcement?")) return;
+    setBusyAction("delete-ann");
+    try {
+      await deleteAnnouncement(token, id);
+      notify("Announcement deleted");
+      await fetchAnnouncements();
+    } catch (err) {
+      notify(err.message, "error");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleUpdateSettings(event) {
+    event.preventDefault();
+    setBusyAction("settings");
+    try {
+      await updateSettings(token, appSettings);
+      notify("Settings updated successfully");
+    } catch (err) {
+      notify(err.message, "error");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
   async function handleNuke() {
     if (!window.confirm("Delete all records? This cannot be undone.")) return;
     setBusyAction("nuke");
@@ -369,6 +475,7 @@ function App() {
           <button className={`button ${activeTab === 'overview' ? 'button--primary' : ''}`} onClick={() => setActiveTab('overview')}>Overview</button>
           <button className={`button ${activeTab === 'tournaments' ? 'button--primary' : ''}`} onClick={() => setActiveTab('tournaments')}>Tournaments</button>
           <button className={`button ${activeTab === 'users' ? 'button--primary' : ''}`} onClick={() => setActiveTab('users')}>Linked Users</button>
+          <button className={`button ${activeTab === 'announce' ? 'button--primary' : ''}`} onClick={() => setActiveTab('announce')}>Announcements</button>
           <button className={`button ${activeTab === 'create' ? 'button--primary' : ''}`} onClick={() => setActiveTab('create')}>New Tournament</button>
           <button className={`button ${activeTab === 'settings' ? 'button--primary' : ''}`} onClick={() => setActiveTab('settings')}>Settings</button>
           
@@ -577,6 +684,78 @@ function App() {
               </div>
           )}
 
+          {activeTab === 'announce' && (
+            <div className="stack">
+              <section className="card">
+                <div className="card-head"><h2>Manual Announcement</h2></div>
+                <form className="stack" onSubmit={handleAnnounce}>
+                  <p className="muted">Send a manual message or schedule it for later. You can use Discord Markdown.</p>
+                  <label className="field">
+                    <span>Channel ID</span>
+                    <input 
+                      placeholder="e.g. 123456789012345678" 
+                      value={announcementForm.channel_id} 
+                      onChange={e => setAnnouncementForm({...announcementForm, channel_id: e.target.value})} 
+                      required 
+                    />
+                  </label>
+                  <div className="grid-cols-2">
+                    <label className="field">
+                      <span>Message</span>
+                      <textarea 
+                        placeholder="Enter your message here..." 
+                        value={announcementForm.message} 
+                        onChange={e => setAnnouncementForm({...announcementForm, message: e.target.value})} 
+                        rows={10} 
+                        required 
+                      />
+                    </label>
+                    <div className="field">
+                      <span>Preview</span>
+                      <div className="markdown-preview" style={{ padding: '1rem', border: '1px solid var(--border)', borderRadius: '8px', minHeight: '200px', background: '#2c2f33', color: '#ffffff' }}>
+                        <ReactMarkdown>{announcementForm.message || "*Message preview will appear here...*"}</ReactMarkdown>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="form-row">
+                    <label className="field">
+                      <span>Scheduled Date (Optional)</span>
+                      <input type="date" value={announcementForm.scheduled_date} onChange={e => setAnnouncementForm({...announcementForm, scheduled_date: e.target.value})} />
+                    </label>
+                    <label className="field">
+                      <span>Scheduled Time (Optional)</span>
+                      <input type="time" value={announcementForm.scheduled_time} onChange={e => setAnnouncementForm({...announcementForm, scheduled_time: e.target.value})} />
+                    </label>
+                  </div>
+                  <button className="button button--primary" type="submit" disabled={busyAction === 'announce'}>
+                    {busyAction === 'announce' ? 'Processing...' : (announcementForm.scheduled_date ? 'Schedule Announcement' : 'Send Immediately')}
+                  </button>
+                </form>
+              </section>
+
+              <section className="card">
+                <div className="card-head"><h2>Scheduled & Recent Announcements</h2></div>
+                <div className="list">
+                  {announcements.length === 0 ? <p className="empty-state">No scheduled announcements.</p> : 
+                    announcements.map(ann => (
+                      <div key={ann.announcement_id} className="list-item">
+                        <div className="list-item__main">
+                          <strong style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '300px' }}>{ann.message}</strong>
+                          <span>Channel: {ann.channel_id}</span>
+                        </div>
+                        <div className="list-item__meta">
+                          <span className={`chip ${ann.sent ? 'chip--finished' : 'chip--planned'}`}>{ann.sent ? 'Sent' : 'Scheduled'}</span>
+                          <span className="muted">{formatDate(ann.scheduled_for)}</span>
+                          {!ann.sent && <button className="button button--small button--danger" onClick={() => handleDeleteAnnouncement(ann.announcement_id)}>Cancel</button>}
+                        </div>
+                      </div>
+                    ))
+                  }
+                </div>
+              </section>
+            </div>
+          )}
+
           {activeTab === 'create' && (
             <section className="card">
               <div className="card-head"><h2>New Tournament</h2></div>
@@ -612,6 +791,54 @@ function App() {
 
           {activeTab === 'settings' && (
             <div className="stack">
+                <section className="card">
+                    <div className="card-head"><h2>Discord & Chess.com Configuration</h2></div>
+                    <form className="stack" onSubmit={handleUpdateSettings}>
+                        <div className="grid-cols-2">
+                            <label className="field">
+                                <span>Discord Guild ID</span>
+                                <input value={appSettings.discord_guild_id} onChange={e => setAppSettings({...appSettings, discord_guild_id: e.target.value})} placeholder="Server ID" />
+                            </label>
+                            <label className="field">
+                                <span>Chess.com Club ID</span>
+                                <input value={appSettings.chesscom_club_id} onChange={e => setAppSettings({...appSettings, chesscom_club_id: e.target.value})} placeholder="e.g. chess-com-university" />
+                            </label>
+                        </div>
+                        <div className="grid-cols-2">
+                            <label className="field">
+                                <span>Announcement Channel ID</span>
+                                <input value={appSettings.discord_announcement_channel_id} onChange={e => setAppSettings({...appSettings, discord_announcement_channel_id: e.target.value})} placeholder="Channel for news" />
+                            </label>
+                            <label className="field">
+                                <span>Results Channel ID</span>
+                                <input value={appSettings.discord_results_channel_id} onChange={e => setAppSettings({...appSettings, discord_results_channel_id: e.target.value})} placeholder="Channel for tournament results" />
+                            </label>
+                        </div>
+                        <div className="grid-cols-2">
+                            <label className="field">
+                                <span>Puzzle Channel ID</span>
+                                <input value={appSettings.discord_puzzle_channel_id} onChange={e => setAppSettings({...appSettings, discord_puzzle_channel_id: e.target.value})} placeholder="Channel for daily puzzles" />
+                            </label>
+                            <label className="field">
+                                <span>Players Role ID (Mention)</span>
+                                <input value={appSettings.discord_players_role_id} onChange={e => setAppSettings({...appSettings, discord_players_role_id: e.target.value})} placeholder="Role to ping" />
+                            </label>
+                        </div>
+                        <div className="grid-cols-2">
+                            <label className="field">
+                                <span>Verified Role ID</span>
+                                <input value={appSettings.discord_verified_role_id} onChange={e => setAppSettings({...appSettings, discord_verified_role_id: e.target.value})} placeholder="Role given after /link" />
+                            </label>
+                            <label className="field">
+                                <span>Champion Role ID</span>
+                                <input value={appSettings.discord_champion_role_id} onChange={e => setAppSettings({...appSettings, discord_champion_role_id: e.target.value})} placeholder="Role given to winners" />
+                            </label>
+                        </div>
+                        <button className="button button--primary" type="submit" disabled={busyAction === 'settings'}>
+                            {busyAction === 'settings' ? 'Saving...' : 'Save Configuration'}
+                        </button>
+                    </form>
+                </section>
                 <section className="card">
                     <div className="card-head"><h2>Automation Info</h2></div>
                     <p>The bot polls Chess.com every minute to check for finished tournaments.</p>

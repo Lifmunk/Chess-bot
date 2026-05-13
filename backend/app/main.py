@@ -24,6 +24,10 @@ from .schemas import (
     UserOut,
     UserLinkRequest,
     UserListResponse,
+    AnnouncementRequest,
+    AnnouncementCreate,
+    AnnouncementUpdate,
+    AnnouncementOut,
 )
 from .security import create_admin_token, require_admin
 
@@ -91,6 +95,20 @@ class DiscordBridge:
     async def announce_reminder(self, tournament: dict, time_left: str) -> None:
         if await self._wait_for_ready():
             await self.bot.announce_tournament_reminder(tournament, time_left)
+
+    async def manual_announce(self, channel_id: str, message: str) -> None:
+        if await self._wait_for_ready():
+            try:
+                await self.bot.safe_send(int(channel_id), content=message)
+            except ValueError:
+                logging.error("Invalid channel ID for manual announcement: %s", channel_id)
+
+    async def check_scheduled_announcements(self) -> None:
+        pending = await db.get_pending_announcements()
+        for ann in pending:
+            logging.info("Sending scheduled announcement %s", ann["announcement_id"])
+            await self.manual_announce(ann["channel_id"], ann["message"])
+            await db.update_announcement(ann["announcement_id"], {"sent": True})
 
     async def check_reminders(self) -> None:
         pending = await db.get_pending_reminders(minutes_before=30)
@@ -168,6 +186,7 @@ async def automation_loop():
             await discord_bridge.check_automated_starts()
             await discord_bridge.check_reminders()
             await discord_bridge.check_tournament_results()
+            await discord_bridge.check_scheduled_announcements()
         except Exception:
             logging.exception("Error in automation loop")
         await asyncio.sleep(60)
@@ -382,6 +401,56 @@ async def unlink_user(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@app.post("/announce", status_code=status.HTTP_200_OK)
+async def manual_announce(
+    payload: AnnouncementRequest,
+    _: dict = Depends(require_admin),
+) -> dict[str, str]:
+    await app.state.discord.manual_announce(payload.channel_id, payload.message)
+    return {"message": "Announcement sent"}
+
+
+@app.get("/announcements", response_model=list[AnnouncementOut])
+async def get_announcements(
+    sent: bool | None = None,
+    _: dict = Depends(require_admin),
+) -> list[AnnouncementOut]:
+    items = await db.list_announcements(sent)
+    return [AnnouncementOut(**item) for item in items]
+
+
+@app.post("/announcements", response_model=AnnouncementOut, status_code=status.HTTP_201_CREATED)
+async def schedule_announcement(
+    payload: AnnouncementCreate,
+    _: dict = Depends(require_admin),
+) -> AnnouncementOut:
+    announcement = await db.create_announcement(payload.model_dump())
+    return AnnouncementOut(**announcement)
+
+
+@app.patch("/announcements/{announcement_id}", response_model=AnnouncementOut)
+async def update_announcement(
+    announcement_id: str,
+    payload: AnnouncementUpdate,
+    _: dict = Depends(require_admin),
+) -> AnnouncementOut:
+    announcement = await db.update_announcement(announcement_id, payload.model_dump(exclude_unset=True))
+    if not announcement:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Announcement not found")
+    return AnnouncementOut(**announcement)
+
+
+@app.delete("/announcements/{announcement_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_announcement(
+    announcement_id: str,
+    _: dict = Depends(require_admin),
+) -> Response:
+    deleted = await db.delete_announcement(announcement_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Announcement not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.get("/templates")
 async def templates(_: dict = Depends(require_admin)) -> dict[str, list[str]]:
     return {
@@ -416,6 +485,20 @@ async def templates(_: dict = Depends(require_admin)) -> dict[str, list[str]]:
 async def nuke(_: dict = Depends(require_admin)) -> Response:
     await db.nuke_database()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/settings")
+async def get_settings_endpoint(_: dict = Depends(require_admin)) -> dict[str, Any]:
+    return await db.get_app_settings()
+
+
+@app.post("/settings")
+async def update_settings_endpoint(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
+    settings = await db.update_app_settings(payload)
+    # Trigger bot to refresh settings
+    if hasattr(app.state, "discord") and hasattr(app.state.discord, "bot"):
+        await app.state.discord.bot.refresh_settings()
+    return settings
 
 
 @app.exception_handler(HTTPException)
