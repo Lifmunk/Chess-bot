@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Response, status, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -493,7 +494,7 @@ async def get_settings_endpoint(_: dict = Depends(require_admin)) -> dict[str, A
 
 
 @app.post("/settings")
-async def update_settings_endpoint(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
+async def update_settings_endpoint(payload: dict[str, Any] = Body(...), _: dict = Depends(require_admin)) -> dict[str, Any]:
     old_settings = await db.get_app_settings()
     new_settings = await db.update_app_settings(payload)
 

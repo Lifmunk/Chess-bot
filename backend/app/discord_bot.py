@@ -45,7 +45,9 @@ class ChessClubBot(commands.Bot):
                 logger.warning("Failed to sync commands to guild %s: %s", guild_id, e)
         else:
             await self.tree.sync()
-        self.daily_puzzle_loop.start()
+        
+        if not self.daily_puzzle_loop.is_running():
+            self.daily_puzzle_loop.start()
 
     async def on_ready(self) -> None:
         logger.info("Discord bot ready as %s", self.user)
