@@ -316,7 +316,19 @@ async def delete_announcement(announcement_id: str) -> bool:
 
 # Dynamic Settings
 async def get_app_settings() -> dict[str, Any]:
-...
+    database = get_db()
+    doc = await database.settings.find_one({"_id": "app_config"})
+    if not doc:
+        return {}
+    return doc.get("values", {})
+
+async def update_app_settings(values: dict[str, Any]) -> dict[str, Any]:
+    database = get_db()
+    await database.settings.update_one(
+        {"_id": "app_config"},
+        {"$set": {"values": values}},
+        upsert=True
+    )
     return await get_app_settings()
 
 # Opening of the Week
