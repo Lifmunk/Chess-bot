@@ -89,18 +89,24 @@ class ChessClubBot(commands.Bot):
     async def announce_tournament_created(self, tournament: dict[str, Any]) -> None:
         ai_description = await ai_service.generate_message("tournament_created", tournament)
         embed = discord.Embed(
-            title="Tournament scheduled",
+            title=f"Tournament: {tournament['name']}",
             description=ai_description,
             color=discord.Color.blue(),
         )
-        embed.add_field(name="Tournament ID", value=tournament["tournament_id"], inline=True)
         embed.add_field(name="Format", value=tournament["format"], inline=True)
+        embed.add_field(name="Time Control", value=tournament.get("time_control", "10 min"), inline=True)
         embed.add_field(name="Rated", value="Yes" if tournament["rated"] else "No", inline=True)
+        
         if tournament.get("scheduled_for"):
             embed.add_field(name="Scheduled start", value=f"<t:{int(tournament['scheduled_for'].timestamp())}:F>", inline=False)
+        
+        if tournament.get("rules"):
+            embed.add_field(name="Rules", value=tournament["rules"][:1024], inline=False)
+        
         embed.add_field(name="Link", value=f"[Open Chess.com tournament]({tournament['chesscom_link']})", inline=False)
+        
         if tournament.get("notes"):
-            embed.add_field(name="Notes", value=tournament["notes"][:1024], inline=False)
+            embed.add_field(name="Staff Notes", value=tournament["notes"][:1024], inline=False)
 
         await self.safe_send(self.announcement_channel_id(), content=self.announcement_mention(), embed=embed)
 

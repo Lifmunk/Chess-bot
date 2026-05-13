@@ -21,6 +21,9 @@ class TournamentCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     chesscom_link: str = Field(min_length=1, max_length=500)
     format: str = Field(min_length=1, max_length=60)
+    time_control: str = Field(default="10 min", min_length=1, max_length=60)
+    rules: Optional[str] = Field(default="", max_length=2000)
+    description: Optional[str] = Field(default="", max_length=2000)
     rated: bool = True
     scheduled_for: Optional[datetime] = None
     notes: Optional[str] = Field(default="", max_length=1000)
@@ -32,6 +35,9 @@ class TournamentUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=120)
     chesscom_link: Optional[str] = Field(None, max_length=500)
     format: Optional[str] = Field(None, max_length=60)
+    time_control: Optional[str] = Field(None, max_length=60)
+    rules: Optional[str] = Field(None, max_length=2000)
+    description: Optional[str] = Field(None, max_length=2000)
     rated: Optional[bool] = None
     scheduled_for: Optional[datetime] = None
     notes: Optional[str] = Field(None, max_length=1000)
@@ -51,6 +57,9 @@ class TournamentOut(BaseModel):
     name: str
     chesscom_link: str
     format: str
+    time_control: str = "10 min"
+    rules: Optional[str] = ""
+    description: Optional[str] = ""
     rated: bool
     status: str
     scheduled_for: Optional[datetime] = None

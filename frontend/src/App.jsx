@@ -20,6 +20,9 @@ const emptyForm = {
   name: "",
   chesscom_link: "",
   format: "Swiss",
+  time_control: "10 min",
+  rules: "",
+  description: "",
   rated: true,
   scheduled_date: "",
   scheduled_time: "",
@@ -117,7 +120,7 @@ function App() {
     if (!token || !user) return;
     try {
       const data = await getUsers(token);
-      setUsers(data || []);
+      setUsers(data.items || []);
     } catch (err) {
       console.error("Users fetch failed", err);
     }
@@ -318,6 +321,9 @@ function App() {
       name: selectedTournament.name,
       chesscom_link: selectedTournament.chesscom_link,
       format: selectedTournament.format,
+      time_control: selectedTournament.time_control || "10 min",
+      rules: selectedTournament.rules || "",
+      description: selectedTournament.description || "",
       rated: selectedTournament.rated,
       scheduled_date: dt ? dt.toISOString().split('T')[0] : "",
       scheduled_time: dt ? dt.toTimeString().split(' ')[0].slice(0, 5) : "",
@@ -453,12 +459,25 @@ function App() {
                   </div>
                   <div className="detail-grid">
                     <div className="detail-item"><span>Format</span><strong>{selectedTournament.format}</strong></div>
+                    <div className="detail-item"><span>Time Control</span><strong>{selectedTournament.time_control}</strong></div>
                     <div className="detail-item"><span>Rated</span><strong>{selectedTournament.rated ? "Yes" : "No"}</strong></div>
                     <div className="detail-item"><span>Scheduled</span><strong>{formatDate(selectedTournament.scheduled_for)}</strong></div>
                     <div className="detail-item"><span>Automated</span><strong>{selectedTournament.is_automated ? "Yes" : "No"}</strong></div>
                     {selectedTournament.recurrence && <div className="detail-item"><span>Recurrence</span><strong>{selectedTournament.recurrence}</strong></div>}
                     <div className="detail-item"><span>Link</span><a href={selectedTournament.chesscom_link} target="_blank" rel="noreferrer">Open Chess.com</a></div>
                   </div>
+                  {selectedTournament.description && (
+                    <div className="detail-text-block">
+                        <span>Description</span>
+                        <p>{selectedTournament.description}</p>
+                    </div>
+                  )}
+                  {selectedTournament.rules && (
+                    <div className="detail-text-block">
+                        <span>Rules</span>
+                        <p>{selectedTournament.rules}</p>
+                    </div>
+                  )}
                   <div className="detail-actions" style={{ marginTop: '1rem' }}>
                     {selectedTournament.status === 'planned' && <button className="button button--primary" onClick={() => handleStart(selectedTournament.tournament_id)}>Start Now</button>}
                   </div>
@@ -494,13 +513,16 @@ function App() {
                         <label className="field"><span>Name</span><input value={form.name} onChange={e => setForm({...form, name: e.target.value})} required /></label>
                         <label className="field"><span>Chess.com Link</span><input value={form.chesscom_link} onChange={e => setForm({...form, chesscom_link: e.target.value})} required /></label>
                         <div className="form-row">
-                        <label className="field"><span>Format</span><select value={form.format} onChange={e => setForm({...form, format: e.target.value})}><option value="Swiss">Swiss</option><option value="Arena">Arena</option></select></label>
-                        <label className="field"><span>Rated</span><div className="toggle-row"><input type="checkbox" checked={form.rated} onChange={e => setForm({...form, rated: e.target.checked})} /><span>{form.rated ? 'Yes' : 'No'}</span></div></label>
+                          <label className="field"><span>Format</span><select value={form.format} onChange={e => setForm({...form, format: e.target.value})}><option value="Swiss">Swiss</option><option value="Arena">Arena</option></select></label>
+                          <label className="field"><span>Time Control</span><input value={form.time_control} onChange={e => setForm({...form, time_control: e.target.value})} placeholder="e.g. 10 min" /></label>
+                          <label className="field"><span>Rated</span><div className="toggle-row"><input type="checkbox" checked={form.rated} onChange={e => setForm({...form, rated: e.target.checked})} /><span>{form.rated ? 'Yes' : 'No'}</span></div></label>
                         </div>
                         <div className="form-row">
-                        <label className="field"><span>Date</span><input type="date" value={form.scheduled_date} onChange={e => setForm({...form, scheduled_date: e.target.value})} /></label>
-                        <label className="field"><span>Time</span><input type="time" value={form.scheduled_time} onChange={e => setForm({...form, scheduled_time: e.target.value})} /></label>
+                          <label className="field"><span>Date</span><input type="date" value={form.scheduled_date} onChange={e => setForm({...form, scheduled_date: e.target.value})} /></label>
+                          <label className="field"><span>Time</span><input type="time" value={form.scheduled_time} onChange={e => setForm({...form, scheduled_time: e.target.value})} /></label>
                         </div>
+                        <label className="field"><span>Description</span><textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="What's this tournament about?" rows={3} /></label>
+                        <label className="field"><span>Rules</span><textarea value={form.rules} onChange={e => setForm({...form, rules: e.target.value})} placeholder="Custom rules for this tournament" rows={3} /></label>
                         <div className="form-row">
                             <label className="field"><span>Automate</span><div className="toggle-row"><input type="checkbox" checked={form.is_automated} onChange={e => setForm({...form, is_automated: e.target.checked})} /><span>{form.is_automated ? 'On' : 'Off'}</span></div></label>
                             <label className="field"><span>Recurrence</span>
@@ -563,12 +585,15 @@ function App() {
                 <label className="field"><span>Chess.com Link</span><input value={form.chesscom_link} onChange={e => setForm({...form, chesscom_link: e.target.value})} required /></label>
                 <div className="form-row">
                   <label className="field"><span>Format</span><select value={form.format} onChange={e => setForm({...form, format: e.target.value})}><option value="Swiss">Swiss</option><option value="Arena">Arena</option></select></label>
+                  <label className="field"><span>Time Control</span><input value={form.time_control} onChange={e => setForm({...form, time_control: e.target.value})} placeholder="e.g. 10 min" /></label>
                   <label className="field"><span>Rated</span><div className="toggle-row"><input type="checkbox" checked={form.rated} onChange={e => setForm({...form, rated: e.target.checked})} /><span>{form.rated ? 'Yes' : 'No'}</span></div></label>
                 </div>
                 <div className="form-row">
                   <label className="field"><span>Date</span><input type="date" value={form.scheduled_date} onChange={e => setForm({...form, scheduled_date: e.target.value})} /></label>
                   <label className="field"><span>Time</span><input type="time" value={form.scheduled_time} onChange={e => setForm({...form, scheduled_time: e.target.value})} /></label>
                 </div>
+                <label className="field"><span>Description</span><textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="What's this tournament about?" rows={3} /></label>
+                <label className="field"><span>Rules</span><textarea value={form.rules} onChange={e => setForm({...form, rules: e.target.value})} placeholder="Custom rules for this tournament" rows={3} /></label>
                 <div className="form-row">
                     <label className="field"><span>Automate</span><div className="toggle-row"><input type="checkbox" checked={form.is_automated} onChange={e => setForm({...form, is_automated: e.target.checked})} /><span>{form.is_automated ? 'On' : 'Off'}</span></div></label>
                     <label className="field"><span>Recurrence</span>

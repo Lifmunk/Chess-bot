@@ -105,6 +105,9 @@ async def create_tournament(payload: dict[str, Any]) -> dict[str, Any]:
         "name": payload["name"],
         "chesscom_link": payload["chesscom_link"],
         "format": payload["format"],
+        "time_control": payload.get("time_control", "10 min"),
+        "rules": payload.get("rules", ""),
+        "description": payload.get("description", ""),
         "rated": bool(payload.get("rated", True)),
         "status": "planned",
         "scheduled_for": parse_dt(payload.get("scheduled_for")),
@@ -199,7 +202,8 @@ async def update_tournament(tournament_id: str, fields: dict[str, Any]) -> dict[
         "name", "chesscom_link", "format", "rated", "status",
         "scheduled_for", "started_at", "finished_at",
         "winner", "runner_up", "third_place", "notes",
-        "reminder_sent", "results_fetched", "is_automated", "recurrence"
+        "reminder_sent", "results_fetched", "is_automated", "recurrence",
+        "time_control", "rules", "description"
     }
     
     update_data = {k: v for k, v in fields.items() if k in allowed}

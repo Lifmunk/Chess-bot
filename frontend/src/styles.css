@@ -297,6 +297,28 @@ input:focus, select:focus, textarea:focus {
   font-size: 0.875rem;
 }
 
+.detail-text-block {
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background-color: #f8fafc;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.detail-text-block span {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 0.25rem;
+}
+
+.detail-text-block p {
+  font-size: 0.875rem;
+  white-space: pre-wrap;
+}
+
 /* Forms */
 .form-row {
   display: grid;
