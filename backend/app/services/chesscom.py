@@ -114,6 +114,46 @@ async def is_player_in_club(username: str, club_id: str) -> bool:
         return False
 
 
+async def fetch_tournament_details(tournament_url: str) -> dict[str, Any] | None:
+    """
+    Attempts to fetch tournament details from Chess.com API.
+    Expects a URL like https://www.chess.com/tournament/live/-tc-20230512-abcd
+    """
+    if "chess.com/tournament/live/" not in tournament_url:
+        return None
+
+    try:
+        url_id = tournament_url.split("tournament/live/")[-1].split("/")[0].split("?")[0]
+        api_url = f"https://api.chess.com/pub/tournament/{url_id}"
+        
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            resp = await client.get(api_url)
+            if resp.status_code != 200:
+                return None
+            
+            data = resp.json()
+            
+            # Chess.com API returns timestamps for start_time
+            start_time = data.get("start_time")
+            dt = None
+            if start_time:
+                dt = datetime.fromtimestamp(start_time, tz=timezone.utc)
+            
+            settings = data.get("settings", {})
+            
+            return {
+                "name": data.get("name"),
+                "format": str(settings.get("type", "Swiss")).title(),
+                "time_control": f"{settings.get('time_control')}",
+                "rated": settings.get("rated", True),
+                "scheduled_for": dt,
+                "description": data.get("description"),
+            }
+    except Exception as e:
+        print(f"Error fetching tournament details: {e}")
+        return None
+
+
 async def fetch_tournament_results(tournament_url: str) -> dict[str, Any] | None:
     """
     Attempts to fetch tournament results from Chess.com.
@@ -140,18 +180,19 @@ async def fetch_tournament_results(tournament_url: str) -> dict[str, Any] | None
             if results_resp.status_code != 200:
                 return None
             
-            results = results_resp.json().get("players", [])
-            if not results:
+            players = results_resp.json().get("players", [])
+            if not players:
                 return None
             
             # Sort by rank
-            results.sort(key=lambda x: x.get("rank", 999))
+            players.sort(key=lambda x: x.get("rank", 999))
             
             return {
-                "winner": results[0].get("username") if len(results) > 0 else None,
-                "runner_up": results[1].get("username") if len(results) > 1 else None,
-                "third_place": results[2].get("username") if len(results) > 2 else None,
+                "winner": players[0].get("username") if len(players) > 0 else None,
+                "runner_up": players[1].get("username") if len(players) > 1 else None,
+                "third_place": players[2].get("username") if len(players) > 2 else None,
                 "finished_at": datetime.now(timezone.utc)
             }
-    except Exception:
+    except Exception as e:
+        print(f"Error fetching results: {e}")
         return None

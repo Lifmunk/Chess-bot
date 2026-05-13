@@ -52,6 +52,20 @@ class ChessClubBot(commands.Bot):
     async def on_ready(self) -> None:
         logger.info("Discord bot ready as %s", self.user)
         self._ready_event.set()
+        # Start greeting task
+        asyncio.create_task(self.delayed_greeting())
+
+    async def delayed_greeting(self) -> None:
+        await asyncio.sleep(300) # 5 minutes wait
+        await self.refresh_settings()
+        channel_id = self.dynamic_settings.get("discord_greeting_channel_id")
+        if channel_id:
+            message = self.dynamic_settings.get("bot_greeting_message") or "Grandmaster is online and ready for some chess! ♟️"
+            try:
+                await self.safe_send(int(channel_id), content=message)
+                logger.info("Sent startup greeting to channel %s", channel_id)
+            except Exception as e:
+                logger.error("Failed to send startup greeting: %s", e)
 
     async def wait_until_bot_ready(self) -> None:
         await self._ready_event.wait()
@@ -225,6 +239,25 @@ class ChessClubBot(commands.Bot):
 def build_bot(settings: Settings) -> ChessClubBot:
     bot = ChessClubBot(settings)
 
+    @bot.event
+    async def on_message(message: discord.Message):
+        if message.author.bot:
+            return
+        
+        # Check if bot is mentioned
+        if bot.user in message.mentions:
+            # Strip the mention from the content
+            content = message.content.replace(f"<@!{bot.user.id}>", "").replace(f"<@{bot.user.id}>", "").strip()
+            if not content:
+                await message.channel.send("Grandmaster is here! ♟️ How can I help you? (Ask me a chess question!)")
+                return
+            
+            async with message.channel.typing():
+                answer = await ai_service.ask_funny_question(content)
+                await message.reply(answer)
+        
+        await bot.process_commands(message)
+
     @bot.tree.command(name="puzzle", description="Post today's Lichess puzzle in this channel")
     async def puzzle_command(interaction: discord.Interaction) -> None:
         await interaction.response.defer()
@@ -244,13 +277,6 @@ def build_bot(settings: Settings) -> ChessClubBot:
                 jpg_path.unlink(missing_ok=True)
             except OSError:
                 logger.warning("Failed to remove temporary puzzle image %s", jpg_path)
-
-    @bot.tree.command(name="ask", description="Ask the Grandmaster anything (funny responses only)")
-    @app_commands.describe(question="What do you want to ask?")
-    async def ask_command(interaction: discord.Interaction, question: str) -> None:
-        await interaction.response.defer()
-        answer = await ai_service.ask_funny_question(question)
-        await interaction.followup.send(f"**Question:** {question}\n\n{answer}")
 
     @bot.tree.command(name="link", description="Link your Chess.com username to your Discord account")
     @app_commands.describe(username="Your Chess.com username")

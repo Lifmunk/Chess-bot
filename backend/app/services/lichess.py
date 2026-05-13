@@ -7,6 +7,8 @@ from typing import Any
 
 import chess
 import chess.svg
+import chess.pgn
+import io
 import httpx
 from PIL import Image, ImageDraw, ImageFont
 
@@ -51,6 +53,7 @@ class PuzzleData:
     rating: int | None
     plays: int | None
     game_url: str | None
+    pgn: str | None = None
 
     @property
     def puzzle_id(self) -> str:
@@ -254,9 +257,23 @@ async def fetch_daily_puzzle() -> PuzzleData:
         payload = response.json()
 
     puzzle = payload["puzzle"]
-    game = payload.get("game", {})
+    game_data = payload.get("game", {})
     fen = puzzle["fen"]
     board = chess.Board(fen)
+
+    # Generate PGN for the puzzle solution
+    pgn_game = chess.pgn.Game()
+    pgn_game.setup(board)
+    pgn_game.headers["Event"] = f"Lichess Daily Puzzle #{puzzle['id']}"
+    pgn_game.headers["FEN"] = fen
+    
+    node = pgn_game
+    for move_uci in puzzle.get("solution", []):
+        move = chess.Move.from_uci(move_uci)
+        node = node.add_main_variation(move)
+    
+    pgn_string = str(pgn_game)
+
     svg = chess.svg.board(
         board,
         size=540,
@@ -269,7 +286,7 @@ async def fetch_daily_puzzle() -> PuzzleData:
     theme_text = ", ".join(themes) if isinstance(themes, list) else str(themes or "")
 
     return PuzzleData(
-        game=game,
+        game=game_data,
         puzzle=puzzle,
         board=board,
         svg_bytes=svg.encode("utf-8"),
@@ -277,7 +294,8 @@ async def fetch_daily_puzzle() -> PuzzleData:
         theme_text=theme_text,
         rating=puzzle.get("rating"),
         plays=puzzle.get("plays"),
-        game_url=f"https://lichess.org/{game['id']}" if game.get("id") else None,
+        game_url=f"https://lichess.org/{game_data['id']}" if game_data.get("id") else None,
+        pgn=pgn_string,
     )
 
 
@@ -286,12 +304,18 @@ def puzzle_message(puzzle: PuzzleData) -> str:
     player_block = "\n".join(players[:2])
     hint = puzzle.opening_hint or "No solution hint available"
     game_url = puzzle.game_url or "https://lichess.org/training"
-    return (
+    
+    msg = (
         f"Daily puzzle #{puzzle.puzzle_id}\n"
         f"{puzzle.perf_name} • Rated {'yes' if puzzle.rated else 'no'} • Clock {puzzle.clock}\n"
         f"Rating: {puzzle.rating or 'unknown'} • Plays: {puzzle.plays or 'unknown'}\n"
         f"Themes: {puzzle.theme_text or 'mixed'}\n"
         f"{player_block}\n"
         f"Hint: {hint}\n"
-        f"Source: Lichess <{game_url}>"
     )
+    
+    if puzzle.pgn:
+        msg += f"\n**PGN:**\n```\n{puzzle.pgn}\n```\n"
+        
+    msg += f"Source: Lichess <{game_url}>"
+    return msg

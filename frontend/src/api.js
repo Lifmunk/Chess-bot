@@ -75,11 +75,16 @@ export function finishTournament(token, tournamentId, payload) {
   return request(`/tournaments/${tournamentId}/finish`, { token, method: "POST", body: payload });
 }
 
-export function getTournament(token, tournamentId) {
-  return request(`/tournaments/${tournamentId}`, { token });
+export function getTournament(token, tournament_id) {
+  return request(`/tournaments/${tournament_id}`, { token });
+}
+
+export function fetchTournamentInfo(token, url) {
+  return request(`/tournaments/fetch?url=${encodeURIComponent(url)}`, { token });
 }
 
 export function getUsers(token) {
+
   return request("/users", { token });
 }
 
@@ -111,6 +116,10 @@ export function updateAnnouncement(token, id, payload) {
 
 export function deleteAnnouncement(token, id) {
   return request(`/announcements/${id}`, { token, method: "DELETE" });
+}
+
+export function sendAnnouncementNow(token, id) {
+  return request(`/announcements/${id}/send`, { token, method: "POST" });
 }
 
 export function getTemplates(token) {

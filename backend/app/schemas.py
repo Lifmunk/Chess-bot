@@ -44,6 +44,7 @@ class TournamentUpdate(BaseModel):
     is_automated: Optional[bool] = None
     recurrence: Optional[str] = None
     status: Optional[str] = None
+    reannounce: Optional[bool] = False
 
 
 class TournamentResultUpdate(BaseModel):

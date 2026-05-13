@@ -12,6 +12,7 @@ import {
   startTournament,
   updateTournament,
   deleteTournament,
+  fetchTournamentInfo,
   getUsers,
   linkUser,
   unlinkUser,
@@ -20,6 +21,7 @@ import {
   scheduleAnnouncement,
   updateAnnouncement,
   deleteAnnouncement,
+  sendAnnouncementNow,
   getSettings,
   updateSettings,
 } from "./api";
@@ -80,6 +82,8 @@ function App() {
     discord_announcement_channel_id: "",
     discord_results_channel_id: "",
     discord_puzzle_channel_id: "",
+    discord_greeting_channel_id: "",
+    bot_greeting_message: "",
     discord_players_role_id: "",
     discord_verified_role_id: "",
     discord_champion_role_id: "",
@@ -87,7 +91,7 @@ function App() {
   });
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState({ ...emptyForm, reannounce: false });
   const [resultForm, setResultForm] = useState(emptyResultForm);
   const [linkUserForm, setLinkUserForm] = useState(emptyLinkUserForm);
   const [announcementForm, setAnnouncementForm] = useState(emptyAnnouncementForm);
@@ -244,6 +248,33 @@ function App() {
     }
   }
 
+  async function handleFetchDetails() {
+    if (!form.chesscom_link) {
+      notify("Please enter a Chess.com tournament link first", "error");
+      return;
+    }
+    setBusyAction("fetch-details");
+    try {
+      const data = await fetchTournamentInfo(token, form.chesscom_link);
+      const dt = data.scheduled_for ? new Date(data.scheduled_for) : null;
+      setForm({
+        ...form,
+        name: data.name || form.name,
+        format: data.format || form.format,
+        time_control: data.time_control || form.time_control,
+        rated: data.rated !== undefined ? data.rated : form.rated,
+        description: data.description || form.description,
+        scheduled_date: dt ? dt.toISOString().split('T')[0] : form.scheduled_date,
+        scheduled_time: dt ? dt.toISOString().split('T')[1].slice(0, 5) : form.scheduled_time,
+      });
+      notify("Tournament details fetched successfully");
+    } catch (err) {
+      notify(err.message, "error");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
   async function handleUpdate(event) {
     event.preventDefault();
     if (!selectedId) return;
@@ -370,6 +401,19 @@ function App() {
     }
   }
 
+  async function handleSendAnnouncementNow(id) {
+    setBusyAction("send-ann");
+    try {
+      await sendAnnouncementNow(token, id);
+      notify("Announcement sent successfully");
+      await fetchAnnouncements();
+    } catch (err) {
+      notify(err.message, "error");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
   async function handleUpdateSettings(event) {
     event.preventDefault();
     setBusyAction("settings");
@@ -419,6 +463,7 @@ function App() {
       notes: selectedTournament.notes || "",
       is_automated: selectedTournament.is_automated,
       recurrence: selectedTournament.recurrence || "",
+      reannounce: false,
     });
     setIsEditing(true);
   }
@@ -726,7 +771,15 @@ function App() {
                       <form className="space-y-6" onSubmit={handleUpdate}>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                           <div><label className="label">Tournament Name</label><input className="input" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required /></div>
-                          <div><label className="label">Chess.com Link</label><input className="input" value={form.chesscom_link} onChange={e => setForm({...form, chesscom_link: e.target.value})} required /></div>
+                          <div>
+                            <label className="label">Chess.com Link</label>
+                            <div className="flex gap-2">
+                              <input className="input" value={form.chesscom_link} onChange={e => setForm({...form, chesscom_link: e.target.value})} required />
+                              <button className="btn btn-secondary btn-small whitespace-nowrap" type="button" onClick={handleFetchDetails} disabled={busyAction === "fetch-details"}>
+                                {busyAction === "fetch-details" ? "Fetching..." : "Fetch Info"}
+                              </button>
+                            </div>
+                          </div>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                           <div><label className="label">Format</label><select className="input font-semibold" value={form.format} onChange={e => setForm({...form, format: e.target.value})}><option value="Swiss">Swiss</option><option value="Arena">Arena</option></select></div>
@@ -743,6 +796,7 @@ function App() {
                         </div>
                         <div className="flex flex-col sm:flex-row gap-8 items-center pt-6 border-t border-brand-50">
                             <label className="flex items-center gap-3 cursor-pointer"><input type="checkbox" className="w-5 h-5 text-accent border-brand-300 rounded focus:ring-accent" checked={form.is_automated} onChange={e => setForm({...form, is_automated: e.target.checked})} /><span className="text-sm font-bold text-brand-700">Enable Automation</span></label>
+                            <label className="flex items-center gap-3 cursor-pointer"><input type="checkbox" className="w-5 h-5 text-accent border-brand-300 rounded focus:ring-accent" checked={form.reannounce} onChange={e => setForm({...form, reannounce: e.target.checked})} /><span className="text-sm font-bold text-brand-700">Announce to Discord</span></label>
                             <label className="flex items-center gap-3"><span className="text-xs font-bold text-brand-400 uppercase tracking-widest whitespace-nowrap">Recurrence</span><select className="input py-1 text-sm font-bold text-accent bg-transparent border-none focus:ring-0" value={form.recurrence} onChange={e => setForm({...form, recurrence: e.target.value})}><option value="">None</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
                             <div className="sm:ml-auto flex gap-3 w-full sm:w-auto">
                                 <button className="btn btn-primary flex-1 sm:flex-none px-10" type="submit" disabled={busyAction === 'update'}>Save Changes</button>
@@ -869,6 +923,7 @@ function App() {
                           </div>
                         </div>
                         <div className="flex items-center gap-4">
+                          {!ann.sent && <button className="btn btn-primary btn-small py-1 px-3 text-[10px]" onClick={() => handleSendAnnouncementNow(ann.announcement_id)} disabled={busyAction === 'send-ann'}>Send Now</button>}
                           <span className={`chip ${ann.sent ? 'bg-brand-50 text-brand-400 border-brand-100' : 'bg-accent/10 text-accent border-accent/20'}`}>
                             {ann.sent ? 'Sent' : 'Scheduled'}
                           </span>
@@ -892,7 +947,15 @@ function App() {
               <form className="space-y-8" onSubmit={handleCreate}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-1.5"><label className="label">Event Name</label><input className="input" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required placeholder="e.g. Weekly Blitz #42" /></div>
-                  <div className="space-y-1.5"><label className="label">Chess.com Link</label><input className="input" value={form.chesscom_link} onChange={e => setForm({...form, chesscom_link: e.target.value})} required placeholder="https://www.chess.com/tournament/live/..." /></div>
+                  <div className="space-y-1.5">
+                    <label className="label">Chess.com Link</label>
+                    <div className="flex gap-2">
+                      <input className="input" value={form.chesscom_link} onChange={e => setForm({...form, chesscom_link: e.target.value})} required placeholder="https://www.chess.com/tournament/live/..." />
+                      <button className="btn btn-secondary btn-small whitespace-nowrap" type="button" onClick={handleFetchDetails} disabled={busyAction === "fetch-details"}>
+                        {busyAction === "fetch-details" ? "Fetching..." : "Fetch Info"}
+                      </button>
+                    </div>
+                  </div>
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -935,6 +998,11 @@ function App() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="space-y-1.5"><label className="label">Discord Server (Guild) ID</label><input className="input" value={appSettings.discord_guild_id} onChange={e => setAppSettings({...appSettings, discord_guild_id: e.target.value})} placeholder="000000000000000000" /></div>
                             <div className="space-y-1.5"><label className="label">Chess.com Club ID</label><input className="input" value={appSettings.chesscom_club_id} onChange={e => setAppSettings({...appSettings, chesscom_club_id: e.target.value})} placeholder="club-name" /></div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-1.5"><label className="label">Startup Greeting Channel ID</label><input className="input" value={appSettings.discord_greeting_channel_id} onChange={e => setAppSettings({...appSettings, discord_greeting_channel_id: e.target.value})} placeholder="000000000000000000" /></div>
+                            <div className="space-y-1.5"><label className="label">Greeting Message</label><input className="input" value={appSettings.bot_greeting_message} onChange={e => setAppSettings({...appSettings, bot_greeting_message: e.target.value})} placeholder="Grandmaster is online! ♟️" /></div>
                         </div>
                         
                         <div className="space-y-6">

@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from . import db
 from .config import get_settings
 from .discord_bot import build_bot
-from .services.chesscom import fetch_tournament_results
+from .services.chesscom import fetch_tournament_results, fetch_tournament_details
 from .schemas import (
     LoginRequest,
     MeResponse,
@@ -97,19 +97,24 @@ class DiscordBridge:
         if await self._wait_for_ready():
             await self.bot.announce_tournament_reminder(tournament, time_left)
 
-    async def manual_announce(self, channel_id: str, message: str) -> None:
+    async def manual_announce(self, channel_id: str, message: str) -> bool:
         if await self._wait_for_ready():
             try:
                 await self.bot.safe_send(int(channel_id), content=message)
+                return True
             except ValueError:
                 logging.error("Invalid channel ID for manual announcement: %s", channel_id)
+        return False
 
     async def check_scheduled_announcements(self) -> None:
         pending = await db.get_pending_announcements()
         for ann in pending:
             logging.info("Sending scheduled announcement %s", ann["announcement_id"])
-            await self.manual_announce(ann["channel_id"], ann["message"])
-            await db.update_announcement(ann["announcement_id"], {"sent": True})
+            success = await self.manual_announce(ann["channel_id"], ann["message"])
+            if success:
+                await db.update_announcement(ann["announcement_id"], {"sent": True})
+            else:
+                logging.warning("Failed to send scheduled announcement %s, will retry.", ann["announcement_id"])
 
     async def check_reminders(self) -> None:
         pending = await db.get_pending_reminders(minutes_before=30)
@@ -161,13 +166,15 @@ class DiscordBridge:
                     elif t["recurrence"] == "weekly":
                         next_start = t["scheduled_for"] + timedelta(days=7)
                     elif t["recurrence"] == "monthly":
-                        # Better monthly recurrence: 30 days for now or exact month logic
                         next_start = t["scheduled_for"] + timedelta(days=30)
                     
                     if next_start:
+                        # For recurring tournaments, we might not have the new link yet if it's not created
+                        # User requested option to add next event url.
+                        # For now, we create the record and user can update link in admin.
                         await db.create_tournament({
                             "name": t["name"],
-                            "chesscom_link": t["chesscom_link"],
+                            "chesscom_link": t["chesscom_link"], # Placeholder or same if multi-event link
                             "format": t["format"],
                             "rated": t["rated"],
                             "scheduled_for": next_start,
@@ -288,6 +295,14 @@ async def get_leaderboard(
     return await db.get_leaderboard(limit)
 
 
+@app.get("/tournaments/fetch")
+async def fetch_tournament_info(url: str, _: dict = Depends(require_admin)):
+    details = await fetch_tournament_details(url)
+    if not details:
+        raise HTTPException(status_code=400, detail="Could not fetch tournament details. Ensure the link is correct.")
+    return details
+
+
 @app.post("/tournaments", response_model=TournamentOut, status_code=status.HTTP_201_CREATED)
 async def create_tournament(
     payload: TournamentCreate,
@@ -315,9 +330,17 @@ async def update_tournament(
     payload: TournamentUpdate,
     _: dict = Depends(require_admin),
 ) -> TournamentOut:
-    tournament = await db.update_tournament(tournament_id, payload.model_dump(exclude_unset=True))
+    reannounce = payload.reannounce
+    tournament_data = payload.model_dump(exclude_unset=True)
+    tournament_data.pop("reannounce", None)
+    
+    tournament = await db.update_tournament(tournament_id, tournament_data)
     if not tournament:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tournament not found")
+    
+    if reannounce:
+        await app.state.discord.announce_created(tournament)
+        
     return tournament_to_response(tournament)
 
 
@@ -407,7 +430,9 @@ async def manual_announce(
     payload: AnnouncementRequest,
     _: dict = Depends(require_admin),
 ) -> dict[str, str]:
-    await app.state.discord.manual_announce(payload.channel_id, payload.message)
+    success = await app.state.discord.manual_announce(payload.channel_id, payload.message)
+    if not success:
+        raise HTTPException(status_code=503, detail="Discord bot not ready or invalid channel")
     return {"message": "Announcement sent"}
 
 
@@ -427,6 +452,25 @@ async def schedule_announcement(
 ) -> AnnouncementOut:
     announcement = await db.create_announcement(payload.model_dump())
     return AnnouncementOut(**announcement)
+
+
+@app.post("/announcements/{announcement_id}/send", response_model=AnnouncementOut)
+async def send_announcement_now(
+    announcement_id: str,
+    _: dict = Depends(require_admin),
+) -> AnnouncementOut:
+    announcements = await db.list_announcements()
+    ann = next((a for a in announcements if a["announcement_id"] == announcement_id), None)
+    
+    if not ann:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Announcement not found")
+    
+    success = await app.state.discord.manual_announce(ann["channel_id"], ann["message"])
+    if not success:
+        raise HTTPException(status_code=503, detail="Discord bot not ready or invalid channel")
+    
+    updated = await db.update_announcement(announcement_id, {"sent": True})
+    return AnnouncementOut(**updated)
 
 
 @app.patch("/announcements/{announcement_id}", response_model=AnnouncementOut)
