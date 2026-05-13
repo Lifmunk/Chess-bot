@@ -363,3 +363,45 @@ input:focus, select:focus, textarea:focus {
 
 .auth-card h1 { margin-bottom: 0.5rem; }
 .auth-card p { margin-bottom: 1.5rem; }
+
+/* New Styles */
+.grid-cols-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+
+.button--small {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+.small {
+  font-size: 0.85rem;
+}
+
+.row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.toolbar {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.toolbar input {
+  flex: 1;
+}
+
+.detail-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.is-active {
+  border-color: var(--primary) !important;
+  background-color: #eff6ff !important;
+}

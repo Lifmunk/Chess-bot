@@ -28,6 +28,18 @@ class TournamentCreate(BaseModel):
     recurrence: Optional[str] = None
 
 
+class TournamentUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=120)
+    chesscom_link: Optional[str] = Field(None, max_length=500)
+    format: Optional[str] = Field(None, max_length=60)
+    rated: Optional[bool] = None
+    scheduled_for: Optional[datetime] = None
+    notes: Optional[str] = Field(None, max_length=1000)
+    is_automated: Optional[bool] = None
+    recurrence: Optional[str] = None
+    status: Optional[str] = None
+
+
 class TournamentResultUpdate(BaseModel):
     winner: str = Field(min_length=1, max_length=80)
     runner_up: str = Field(min_length=1, max_length=80)
@@ -54,8 +66,23 @@ class TournamentOut(BaseModel):
     updated_at: datetime
 
 
+class UserOut(BaseModel):
+    discord_id: str
+    chesscom_username: str
+    updated_at: datetime
+
+
+class UserLinkRequest(BaseModel):
+    discord_id: str
+    chesscom_username: str
+
+
 class TournamentListResponse(BaseModel):
     items: list[TournamentOut]
+
+
+class UserListResponse(BaseModel):
+    items: list[UserOut]
 
 
 class MessageResponse(BaseModel):

@@ -199,7 +199,7 @@ async def update_tournament(tournament_id: str, fields: dict[str, Any]) -> dict[
         "name", "chesscom_link", "format", "rated", "status",
         "scheduled_for", "started_at", "finished_at",
         "winner", "runner_up", "third_place", "notes",
-        "reminder_sent", "results_fetched"
+        "reminder_sent", "results_fetched", "is_automated", "recurrence"
     }
     
     update_data = {k: v for k, v in fields.items() if k in allowed}
@@ -217,6 +217,21 @@ async def update_tournament(tournament_id: str, fields: dict[str, Any]) -> dict[
         {"$set": update_data}
     )
     return await get_tournament(tournament_id)
+
+async def delete_tournament(tournament_id: str) -> bool:
+    database = get_db()
+    res = await database.tournaments.delete_one({"tournament_id": tournament_id})
+    return res.deleted_count > 0
+
+async def list_users() -> list[dict[str, Any]]:
+    database = get_db()
+    cursor = database.users.find({}).sort("updated_at", -1)
+    return [_transform_doc(doc) for doc in await cursor.to_list(length=1000)]
+
+async def unlink_user(discord_id: str) -> bool:
+    database = get_db()
+    res = await database.users.delete_one({"discord_id": discord_id})
+    return res.deleted_count > 0
 
 async def get_leaderboard(limit: int = 10) -> list[dict[str, Any]]:
     database = get_db()

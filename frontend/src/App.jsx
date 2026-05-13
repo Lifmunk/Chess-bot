@@ -9,7 +9,11 @@ import {
   me,
   nuke,
   startTournament,
-  getTest,
+  updateTournament,
+  deleteTournament,
+  getUsers,
+  linkUser,
+  unlinkUser,
 } from "./api";
 
 const emptyForm = {
@@ -30,6 +34,11 @@ const emptyResultForm = {
   third_place: "",
 };
 
+const emptyLinkUserForm = {
+  discord_id: "",
+  chesscom_username: "",
+};
+
 function formatDate(value) {
   if (!value) return "Not set";
   const date = new Date(value);
@@ -46,14 +55,17 @@ function App() {
   const [listLoading, setListLoading] = useState(false);
   const [tournaments, setTournaments] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
+  const [users, setUsers] = useState([]);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [form, setForm] = useState(emptyForm);
   const [resultForm, setResultForm] = useState(emptyResultForm);
+  const [linkUserForm, setLinkUserForm] = useState(emptyLinkUserForm);
   const [selectedId, setSelectedId] = useState("");
+  const [isEditing, setIsEditing] = useState(false);
   const [busyAction, setBusyAction] = useState("");
   const [toasts, setToasts] = useState([]);
-  const [activeTab, setActiveTab] = useState("overview"); // overview, tournaments, create, settings
+  const [activeTab, setActiveTab] = useState("overview"); // overview, tournaments, users, create, settings
 
   const deferredQuery = useDeferredValue(query.trim());
 
@@ -101,6 +113,16 @@ function App() {
     }
   };
 
+  const fetchUsers = async () => {
+    if (!token || !user) return;
+    try {
+      const data = await getUsers(token);
+      setUsers(data || []);
+    } catch (err) {
+      console.error("Users fetch failed", err);
+    }
+  };
+
   useEffect(() => {
     if (!token) {
       setAuthLoading(false);
@@ -125,9 +147,15 @@ function App() {
 
   useEffect(() => {
     if (!token || !user) return;
-    fetchTournaments();
-    fetchLeaderboard();
-  }, [token, user, deferredQuery, statusFilter]);
+    if (activeTab === 'overview') {
+      fetchTournaments();
+      fetchLeaderboard();
+    } else if (activeTab === 'tournaments') {
+      fetchTournaments();
+    } else if (activeTab === 'users') {
+      fetchUsers();
+    }
+  }, [token, user, activeTab, deferredQuery, statusFilter]);
 
   async function handleLogin(event) {
     event.preventDefault();
@@ -168,6 +196,42 @@ function App() {
     }
   }
 
+  async function handleUpdate(event) {
+    event.preventDefault();
+    if (!selectedId) return;
+    setBusyAction("update");
+    try {
+      const scheduled_for =
+        form.scheduled_date && form.scheduled_time
+          ? new Date(`${form.scheduled_date}T${form.scheduled_time}`).toISOString()
+          : null;
+      const payload = { ...form, scheduled_for };
+      await updateTournament(token, selectedId, payload);
+      notify("Tournament updated");
+      setIsEditing(false);
+      await fetchTournaments();
+    } catch (err) {
+      notify(err.message, "error");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleDelete(id) {
+    if (!window.confirm("Delete this tournament record?")) return;
+    setBusyAction("delete");
+    try {
+      await deleteTournament(token, id);
+      notify("Tournament deleted");
+      setSelectedId("");
+      await fetchTournaments();
+    } catch (err) {
+      notify(err.message, "error");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
   async function handleStart(tournamentId) {
     setBusyAction("start");
     try {
@@ -198,6 +262,35 @@ function App() {
     }
   }
 
+  async function handleManualLink(event) {
+    event.preventDefault();
+    setBusyAction("link");
+    try {
+      await linkUser(token, linkUserForm);
+      notify("User linked successfully");
+      setLinkUserForm(emptyLinkUserForm);
+      await fetchUsers();
+    } catch (err) {
+      notify(err.message, "error");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleUnlink(discordId) {
+    if (!window.confirm("Unlink this user?")) return;
+    setBusyAction("unlink");
+    try {
+      await unlinkUser(token, discordId);
+      notify("User unlinked");
+      await fetchUsers();
+    } catch (err) {
+      notify(err.message, "error");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
   async function handleNuke() {
     if (!window.confirm("Delete all records? This cannot be undone.")) return;
     setBusyAction("nuke");
@@ -216,6 +309,23 @@ function App() {
     localStorage.removeItem("chessclub_token");
     setToken("");
     setUser(null);
+  }
+
+  function startEditing() {
+    if (!selectedTournament) return;
+    const dt = selectedTournament.scheduled_for ? new Date(selectedTournament.scheduled_for) : null;
+    setForm({
+      name: selectedTournament.name,
+      chesscom_link: selectedTournament.chesscom_link,
+      format: selectedTournament.format,
+      rated: selectedTournament.rated,
+      scheduled_date: dt ? dt.toISOString().split('T')[0] : "",
+      scheduled_time: dt ? dt.toTimeString().split(' ')[0].slice(0, 5) : "",
+      notes: selectedTournament.notes || "",
+      is_automated: selectedTournament.is_automated,
+      recurrence: selectedTournament.recurrence || "",
+    });
+    setIsEditing(true);
   }
 
   if (authLoading) return <div className="app-shell app-shell--centered"><div className="loading-card">Loading...</div></div>;
@@ -252,11 +362,12 @@ function App() {
         <aside className="sidebar stack">
           <button className={`button ${activeTab === 'overview' ? 'button--primary' : ''}`} onClick={() => setActiveTab('overview')}>Overview</button>
           <button className={`button ${activeTab === 'tournaments' ? 'button--primary' : ''}`} onClick={() => setActiveTab('tournaments')}>Tournaments</button>
+          <button className={`button ${activeTab === 'users' ? 'button--primary' : ''}`} onClick={() => setActiveTab('users')}>Linked Users</button>
           <button className={`button ${activeTab === 'create' ? 'button--primary' : ''}`} onClick={() => setActiveTab('create')}>New Tournament</button>
           <button className={`button ${activeTab === 'settings' ? 'button--primary' : ''}`} onClick={() => setActiveTab('settings')}>Settings</button>
           
           <div style={{ marginTop: 'auto' }}>
-            <p className="muted">v1.1.0-mongo</p>
+            <p className="muted">v1.2.0-automated</p>
           </div>
         </aside>
 
@@ -270,19 +381,39 @@ function App() {
                 <div className="stat-card"><span>Finished</span><strong>{stats.finished}</strong></div>
               </section>
 
-              <section className="card">
-                <div className="card-head"><h2>Leaderboard</h2></div>
-                <div className="list">
-                  {leaderboard.length === 0 ? <p className="empty-state">No wins recorded yet.</p> : 
-                    leaderboard.map((player, idx) => (
-                      <div key={player.username} className="list-item">
-                        <strong>{idx + 1}. {player.username}</strong>
-                        <span>{player.wins} wins</span>
-                      </div>
-                    ))
-                  }
-                </div>
-              </section>
+              <div className="grid-cols-2">
+                <section className="card">
+                  <div className="card-head"><h2>Recent Winners</h2></div>
+                  <div className="list">
+                    {leaderboard.length === 0 ? <p className="empty-state">No wins recorded yet.</p> : 
+                      leaderboard.map((player, idx) => (
+                        <div key={player.username} className="list-item">
+                          <div className="list-item__main">
+                            <strong>{idx + 1}. {player.username}</strong>
+                            <span>{player.wins} wins</span>
+                          </div>
+                        </div>
+                      ))
+                    }
+                  </div>
+                </section>
+
+                <section className="card">
+                    <div className="card-head"><h2>Next Up</h2></div>
+                    <div className="list">
+                        {tournaments.filter(t => t.status === 'planned').slice(0, 3).map(t => (
+                            <div key={t.tournament_id} className="list-item">
+                                <div className="list-item__main">
+                                    <strong>{t.name}</strong>
+                                    <span>{formatDate(t.scheduled_for)}</span>
+                                </div>
+                                <span className="chip chip--planned">Planned</span>
+                            </div>
+                        ))}
+                        {tournaments.filter(t => t.status === 'planned').length === 0 && <p className="empty-state">No upcoming tournaments.</p>}
+                    </div>
+                </section>
+              </div>
             </div>
           )}
 
@@ -301,7 +432,7 @@ function App() {
                 <div className="list">
                   {listLoading ? <p className="empty-state">Loading...</p> : 
                     tournaments.map(t => (
-                      <button key={t.tournament_id} className={`list-item ${selectedId === t.tournament_id ? 'is-active' : ''}`} onClick={() => setSelectedId(t.tournament_id)}>
+                      <button key={t.tournament_id} className={`list-item ${selectedId === t.tournament_id ? 'is-active' : ''}`} onClick={() => { setSelectedId(t.tournament_id); setIsEditing(false); }}>
                         <div className="list-item__main"><strong>{t.name}</strong><span>{t.tournament_id}</span></div>
                         <div className="list-item__meta"><span className={`chip chip--${t.status}`}>{t.status}</span><span className="muted">{formatDate(t.scheduled_for)}</span></div>
                       </button>
@@ -310,30 +441,118 @@ function App() {
                 </div>
               </section>
 
-              {selectedTournament && (
+              {selectedTournament && !isEditing && (
                 <section className="card">
-                  <div className="card-head"><h2>{selectedTournament.name}</h2><span className={`chip chip--${selectedTournament.status}`}>{selectedTournament.status}</span></div>
+                  <div className="card-head">
+                    <h2>{selectedTournament.name}</h2>
+                    <div className="row" style={{ gap: '0.5rem' }}>
+                        <button className="button button--small" onClick={startEditing}>Edit</button>
+                        <button className="button button--small button--danger" onClick={() => handleDelete(selectedTournament.tournament_id)}>Delete</button>
+                        <span className={`chip chip--${selectedTournament.status}`}>{selectedTournament.status}</span>
+                    </div>
+                  </div>
                   <div className="detail-grid">
                     <div className="detail-item"><span>Format</span><strong>{selectedTournament.format}</strong></div>
                     <div className="detail-item"><span>Rated</span><strong>{selectedTournament.rated ? "Yes" : "No"}</strong></div>
                     <div className="detail-item"><span>Scheduled</span><strong>{formatDate(selectedTournament.scheduled_for)}</strong></div>
-                    <div className="detail-item"><span>Created</span><strong>{formatDate(selectedTournament.created_at)}</strong></div>
+                    <div className="detail-item"><span>Automated</span><strong>{selectedTournament.is_automated ? "Yes" : "No"}</strong></div>
+                    {selectedTournament.recurrence && <div className="detail-item"><span>Recurrence</span><strong>{selectedTournament.recurrence}</strong></div>}
+                    <div className="detail-item"><span>Link</span><a href={selectedTournament.chesscom_link} target="_blank" rel="noreferrer">Open Chess.com</a></div>
                   </div>
-                  <div className="detail-actions">
+                  <div className="detail-actions" style={{ marginTop: '1rem' }}>
                     {selectedTournament.status === 'planned' && <button className="button button--primary" onClick={() => handleStart(selectedTournament.tournament_id)}>Start Now</button>}
                   </div>
                   {selectedTournament.status !== 'finished' && (
-                    <form className="stack" style={{ marginTop: '2rem' }} onSubmit={handleFinish}>
-                      <h3>Record Results</h3>
-                      <input placeholder="Winner" value={resultForm.winner} onChange={e => setResultForm({...resultForm, winner: e.target.value})} required />
-                      <input placeholder="Runner-up" value={resultForm.runner_up} onChange={e => setResultForm({...resultForm, runner_up: e.target.value})} />
-                      <input placeholder="Third Place" value={resultForm.third_place} onChange={e => setResultForm({...resultForm, third_place: e.target.value})} />
+                    <form className="stack" style={{ marginTop: '2rem', padding: '1rem', border: '1px solid var(--border)', borderRadius: '8px' }} onSubmit={handleFinish}>
+                      <h3>Record Results Manually</h3>
+                      <div className="form-row">
+                        <input placeholder="Winner Username" value={resultForm.winner} onChange={e => setResultForm({...resultForm, winner: e.target.value})} required />
+                        <input placeholder="Runner-up" value={resultForm.runner_up} onChange={e => setResultForm({...resultForm, runner_up: e.target.value})} />
+                        <input placeholder="Third Place" value={resultForm.third_place} onChange={e => setResultForm({...resultForm, third_place: e.target.value})} />
+                      </div>
                       <button className="button button--primary" type="submit" disabled={busyAction === 'finish'}>Publish Results</button>
+                      <p className="muted small">If automated, results will be fetched automatically from Chess.com when finished.</p>
                     </form>
+                  )}
+                  {selectedTournament.status === 'finished' && (
+                      <div className="stack" style={{ marginTop: '1rem' }}>
+                          <h3>Results</h3>
+                          <div className="detail-grid">
+                            <div className="detail-item"><span>Winner</span><strong>{selectedTournament.winner}</strong></div>
+                            <div className="detail-item"><span>Runner-up</span><strong>{selectedTournament.runner_up}</strong></div>
+                            <div className="detail-item"><span>Third Place</span><strong>{selectedTournament.third_place}</strong></div>
+                          </div>
+                      </div>
                   )}
                 </section>
               )}
+
+              {selectedTournament && isEditing && (
+                  <section className="card">
+                      <div className="card-head"><h2>Edit Tournament</h2></div>
+                      <form className="stack" onSubmit={handleUpdate}>
+                        <label className="field"><span>Name</span><input value={form.name} onChange={e => setForm({...form, name: e.target.value})} required /></label>
+                        <label className="field"><span>Chess.com Link</span><input value={form.chesscom_link} onChange={e => setForm({...form, chesscom_link: e.target.value})} required /></label>
+                        <div className="form-row">
+                        <label className="field"><span>Format</span><select value={form.format} onChange={e => setForm({...form, format: e.target.value})}><option value="Swiss">Swiss</option><option value="Arena">Arena</option></select></label>
+                        <label className="field"><span>Rated</span><div className="toggle-row"><input type="checkbox" checked={form.rated} onChange={e => setForm({...form, rated: e.target.checked})} /><span>{form.rated ? 'Yes' : 'No'}</span></div></label>
+                        </div>
+                        <div className="form-row">
+                        <label className="field"><span>Date</span><input type="date" value={form.scheduled_date} onChange={e => setForm({...form, scheduled_date: e.target.value})} /></label>
+                        <label className="field"><span>Time</span><input type="time" value={form.scheduled_time} onChange={e => setForm({...form, scheduled_time: e.target.value})} /></label>
+                        </div>
+                        <div className="form-row">
+                            <label className="field"><span>Automate</span><div className="toggle-row"><input type="checkbox" checked={form.is_automated} onChange={e => setForm({...form, is_automated: e.target.checked})} /><span>{form.is_automated ? 'On' : 'Off'}</span></div></label>
+                            <label className="field"><span>Recurrence</span>
+                                <select value={form.recurrence} onChange={e => setForm({...form, recurrence: e.target.value})}>
+                                    <option value="">None</option>
+                                    <option value="daily">Daily</option>
+                                    <option value="weekly">Weekly</option>
+                                    <option value="monthly">Monthly</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div className="row" style={{ gap: '0.5rem' }}>
+                            <button className="button button--primary" type="submit" disabled={busyAction === 'update'}>Save Changes</button>
+                            <button className="button" type="button" onClick={() => setIsEditing(false)}>Cancel</button>
+                        </div>
+                    </form>
+                  </section>
+              )}
             </div>
+          )}
+
+          {activeTab === 'users' && (
+              <div className="stack">
+                <section className="card">
+                    <div className="card-head"><h2>Link New User</h2></div>
+                    <form className="form-row" onSubmit={handleManualLink}>
+                        <input placeholder="Discord ID" value={linkUserForm.discord_id} onChange={e => setLinkUserForm({...linkUserForm, discord_id: e.target.value})} required />
+                        <input placeholder="Chess.com Username" value={linkUserForm.chesscom_username} onChange={e => setLinkUserForm({...linkUserForm, chesscom_username: e.target.value})} required />
+                        <button className="button button--primary" type="submit" disabled={busyAction === 'link'}>Link User</button>
+                    </form>
+                </section>
+
+                <section className="card">
+                    <div className="card-head"><h2>Linked Users</h2></div>
+                    <div className="list">
+                        {users.length === 0 ? <p className="empty-state">No users linked yet.</p> : 
+                            users.map(u => (
+                                <div key={u.discord_id} className="list-item">
+                                    <div className="list-item__main">
+                                        <strong>{u.chesscom_username}</strong>
+                                        <span>ID: {u.discord_id}</span>
+                                    </div>
+                                    <div className="list-item__meta">
+                                        <span className="muted">{formatDate(u.updated_at)}</span>
+                                        <button className="button button--small button--danger" onClick={() => handleUnlink(u.discord_id)}>Unlink</button>
+                                    </div>
+                                </div>
+                            ))
+                        }
+                    </div>
+                </section>
+              </div>
           )}
 
           {activeTab === 'create' && (
@@ -350,18 +569,41 @@ function App() {
                   <label className="field"><span>Date</span><input type="date" value={form.scheduled_date} onChange={e => setForm({...form, scheduled_date: e.target.value})} /></label>
                   <label className="field"><span>Time</span><input type="time" value={form.scheduled_time} onChange={e => setForm({...form, scheduled_time: e.target.value})} /></label>
                 </div>
-                <label className="field"><span>Automate</span><div className="toggle-row"><input type="checkbox" checked={form.is_automated} onChange={e => setForm({...form, is_automated: e.target.checked})} /><span>{form.is_automated ? 'On' : 'Off'}</span></div></label>
+                <div className="form-row">
+                    <label className="field"><span>Automate</span><div className="toggle-row"><input type="checkbox" checked={form.is_automated} onChange={e => setForm({...form, is_automated: e.target.checked})} /><span>{form.is_automated ? 'On' : 'Off'}</span></div></label>
+                    <label className="field"><span>Recurrence</span>
+                        <select value={form.recurrence} onChange={e => setForm({...form, recurrence: e.target.value})}>
+                            <option value="">None</option>
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                        </select>
+                    </label>
+                </div>
                 <button className="button button--primary" type="submit" disabled={busyAction === 'create'}>Schedule Tournament</button>
               </form>
             </section>
           )}
 
           {activeTab === 'settings' && (
-            <section className="card card--danger stack">
-              <h2>Danger Zone</h2>
-              <p className="muted">This will delete all tournament and user records permanently.</p>
-              <button className="button button--danger" onClick={handleNuke}>Nuke Database</button>
-            </section>
+            <div className="stack">
+                <section className="card">
+                    <div className="card-head"><h2>Automation Info</h2></div>
+                    <p>The bot polls Chess.com every minute to check for finished tournaments.</p>
+                    <p>When a tournament is finished, it automatically:</p>
+                    <ul style={{ marginLeft: '1.5rem', marginTop: '0.5rem' }}>
+                        <li>Fetches the winner, runner-up, and third place.</li>
+                        <li>Updates the tournament record in the database.</li>
+                        <li>Announces results in Discord and pings the winner (if linked).</li>
+                        <li>Assigns the <strong>Champion</strong> role to the winner (if linked).</li>
+                    </ul>
+                </section>
+                <section className="card card--danger stack">
+                    <h2>Danger Zone</h2>
+                    <p className="muted">This will delete all tournament and user records permanently.</p>
+                    <button className="button button--danger" onClick={handleNuke}>Nuke Database</button>
+                </section>
+            </div>
           )}
         </main>
       </div>

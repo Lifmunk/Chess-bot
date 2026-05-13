@@ -49,6 +49,14 @@ export function createTournament(token, payload) {
   return request("/tournaments", { token, method: "POST", body: payload });
 }
 
+export function updateTournament(token, tournamentId, payload) {
+  return request(`/tournaments/${tournamentId}`, { token, method: "PATCH", body: payload });
+}
+
+export function deleteTournament(token, tournamentId) {
+  return request(`/tournaments/${tournamentId}`, { token, method: "DELETE" });
+}
+
 export function startTournament(token, tournamentId) {
   return request(`/tournaments/${tournamentId}/start`, { token, method: "POST" });
 }
@@ -59,6 +67,18 @@ export function finishTournament(token, tournamentId, payload) {
 
 export function getTournament(token, tournamentId) {
   return request(`/tournaments/${tournamentId}`, { token });
+}
+
+export function getUsers(token) {
+  return request("/users", { token });
+}
+
+export function linkUser(token, payload) {
+  return request("/users/link", { token, method: "POST", body: payload });
+}
+
+export function unlinkUser(token, discordId) {
+  return request(`/users/${discordId}`, { token, method: "DELETE" });
 }
 
 export function getTemplates(token) {

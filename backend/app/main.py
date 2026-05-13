@@ -20,6 +20,10 @@ from .schemas import (
     TournamentListResponse,
     TournamentOut,
     TournamentResultUpdate,
+    TournamentUpdate,
+    UserOut,
+    UserLinkRequest,
+    UserListResponse,
 )
 from .security import create_admin_token, require_admin
 
@@ -285,6 +289,29 @@ async def read_tournament(
     return tournament_to_response(tournament)
 
 
+@app.patch("/tournaments/{tournament_id}", response_model=TournamentOut)
+async def update_tournament(
+    tournament_id: str,
+    payload: TournamentUpdate,
+    _: dict = Depends(require_admin),
+) -> TournamentOut:
+    tournament = await db.update_tournament(tournament_id, payload.model_dump(exclude_unset=True))
+    if not tournament:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tournament not found")
+    return tournament_to_response(tournament)
+
+
+@app.delete("/tournaments/{tournament_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_tournament(
+    tournament_id: str,
+    _: dict = Depends(require_admin),
+) -> Response:
+    deleted = await db.delete_tournament(tournament_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tournament not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.post("/tournaments/{tournament_id}/start", response_model=TournamentOut)
 async def start_tournament(
     tournament_id: str,
@@ -323,6 +350,36 @@ async def finish_tournament(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tournament not found")
     await app.state.discord.announce_finished(tournament)
     return tournament_to_response(tournament)
+
+
+@app.get("/users", response_model=UserListResponse)
+async def get_users(_: dict = Depends(require_admin)) -> UserListResponse:
+    items = [UserOut(**item) for item in await db.list_users()]
+    return UserListResponse(items=items)
+
+
+@app.post("/users/link", response_model=UserOut)
+async def manual_link_user(
+    payload: UserLinkRequest,
+    _: dict = Depends(require_admin),
+) -> UserOut:
+    await db.link_user(payload.discord_id, payload.chesscom_username)
+    return UserOut(
+        discord_id=payload.discord_id,
+        chesscom_username=payload.chesscom_username,
+        updated_at=db.utc_now()
+    )
+
+
+@app.delete("/users/{discord_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def unlink_user(
+    discord_id: str,
+    _: dict = Depends(require_admin),
+) -> Response:
+    deleted = await db.unlink_user(discord_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/templates")

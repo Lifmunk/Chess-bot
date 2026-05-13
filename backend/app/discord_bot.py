@@ -123,14 +123,21 @@ class ChessClubBot(commands.Bot):
             color=discord.Color.gold(),
         )
 
+        # Ping the winner if linked
+        winner_ping = ""
+        winner_username = tournament.get("winner")
+        if winner_username:
+            discord_id = await db.get_user_by_chesscom(winner_username)
+            if discord_id:
+                winner_ping = f" Congratulations <@{discord_id}>!"
+
         await self.safe_send(
             self.results_channel_id(),
-            content=f"{self.announcement_mention()} Tournament results are available.",
+            content=f"{self.announcement_mention()} Tournament results are available.{winner_ping}",
             embed=embed,
         )
 
         # Assign champion role if configured
-        winner_username = tournament.get("winner")
         if winner_username and self.settings.discord_champion_role_id and self.settings.discord_guild_id:
             discord_id = await db.get_user_by_chesscom(winner_username)
             if discord_id:
