@@ -4,56 +4,74 @@
 
 @layer base {
   body {
-    @apply bg-chess-black text-white antialiased;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    @apply bg-brand-50 text-brand-900 antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
   }
 }
 
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center px-4 py-2 font-bold rounded-none transition-all focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed border border-chess-green/30 bg-chess-dark text-chess-green hover:bg-chess-green hover:text-chess-black;
+    @apply inline-flex items-center justify-center px-5 py-2.5 font-semibold rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm;
   }
+  
   .btn-primary {
-    @apply border-chess-green bg-chess-green text-chess-black hover:bg-chess-black hover:text-chess-green;
+    @apply bg-accent text-white hover:bg-accent-hover focus:ring-accent shadow-sm;
   }
+  
+  .btn-secondary {
+    @apply bg-white border border-brand-200 text-brand-700 hover:bg-brand-50 focus:ring-brand-200 shadow-sm;
+  }
+  
   .btn-danger {
-    @apply border-chess-red bg-chess-red text-chess-black hover:bg-chess-black hover:text-chess-red;
+    @apply bg-danger text-white hover:bg-red-600 focus:ring-danger shadow-sm;
   }
+  
   .btn-small {
-    @apply px-3 py-1 text-xs uppercase tracking-tighter;
+    @apply px-3 py-1.5 text-xs;
   }
   
   .card {
-    @apply bg-chess-dark border border-chess-gray rounded-none p-6;
+    @apply bg-white border border-brand-100 rounded-xl p-6 shadow-sm;
   }
   
   .input {
-    @apply w-full px-3 py-2 border border-chess-gray rounded-none focus:outline-none focus:border-chess-green transition-all bg-chess-black text-chess-green font-mono placeholder:text-chess-green/20;
+    @apply w-full px-4 py-2.5 border border-brand-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-all bg-white text-brand-900 placeholder:text-brand-400 text-sm;
   }
   
   .label {
-    @apply block text-[10px] font-bold text-chess-green uppercase tracking-[0.2em] mb-2;
+    @apply block text-xs font-semibold text-brand-600 mb-1.5;
   }
   
   .chip {
-    @apply inline-flex items-center px-2 py-0.5 rounded-none text-[9px] font-bold uppercase tracking-widest border;
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border;
   }
 
   .nav-item {
-    @apply w-full text-left px-4 py-3 border-l-4 border-transparent transition-all hover:bg-chess-gray hover:text-chess-green;
+    @apply w-full text-left px-4 py-3 rounded-lg transition-all text-brand-600 hover:bg-brand-100 hover:text-brand-900 flex items-center gap-3 text-sm font-medium;
   }
+  
   .nav-item-active {
-    @apply border-l-chess-green bg-chess-gray text-chess-green;
+    @apply bg-brand-900 text-white hover:bg-brand-800;
   }
 }
 
-/* Custom scrollbar for monochrome theme */
+/* Smooth Transitions */
+.animate-in {
+  animation: enter 0.2s ease-out;
+}
+
+@keyframes enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
 }
 ::-webkit-scrollbar-track {
-  @apply bg-chess-black;
+  @apply bg-brand-50;
 }
 ::-webkit-scrollbar-thumb {
-  @apply bg-chess-gray hover:bg-chess-green/50;
+  @apply bg-brand-200 rounded-full hover:bg-brand-300;
 }
