@@ -25,7 +25,17 @@ async function request(path, { token, method = "GET", body, headers = {} } = {})
     }
   }
   if (!response.ok) {
-    throw new Error(data?.detail || "Request failed");
+    let errorMessage = "Request failed";
+    if (data?.detail) {
+      if (typeof data.detail === "string") {
+        errorMessage = data.detail;
+      } else if (Array.isArray(data.detail)) {
+        errorMessage = data.detail.map(e => (e.msg || "Unknown error") + (e.loc ? ` (${e.loc.join(".")})` : "")).join(", ");
+      } else {
+        errorMessage = JSON.stringify(data.detail);
+      }
+    }
+    throw new Error(errorMessage);
   }
   return data;
 }

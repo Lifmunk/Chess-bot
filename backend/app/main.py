@@ -494,11 +494,19 @@ async def get_settings_endpoint(_: dict = Depends(require_admin)) -> dict[str, A
 
 @app.post("/settings")
 async def update_settings_endpoint(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
-    settings = await db.update_app_settings(payload)
+    old_settings = await db.get_app_settings()
+    new_settings = await db.update_app_settings(payload)
+
     # Trigger bot to refresh settings
-    if hasattr(app.state, "discord") and hasattr(app.state.discord, "bot"):
+    if hasattr(app.state, "discord") and app.state.discord.bot:
         await app.state.discord.bot.refresh_settings()
-    return settings
+
+        # If guild ID changed, re-sync commands
+        if old_settings.get("discord_guild_id") != new_settings.get("discord_guild_id"):
+            logging.info("Discord Guild ID changed, triggering command sync...")
+            await app.state.discord.bot.setup_hook()
+
+    return new_settings
 
 
 @app.exception_handler(HTTPException)
