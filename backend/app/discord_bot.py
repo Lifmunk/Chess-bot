@@ -199,6 +199,24 @@ class ChessClubBot(commands.Bot):
         embed.add_field(name="Link", value=f"[Open Chess.com tournament]({tournament['chesscom_link']})", inline=False)
         await self.safe_send(self.announcement_channel_id(), content=self.announcement_mention(), embed=embed)
 
+    async def announce_opening(self, opening_data: dict[str, Any]) -> None:
+        channel_id = self.dynamic_settings.get("discord_opening_channel_id")
+        if not channel_id:
+            logger.warning("No opening channel ID configured.")
+            return
+
+        embed = discord.Embed(
+            title=f"Opening of the Week: {opening_data['name']}",
+            description=opening_data["summary"],
+            color=discord.Color.blue(),
+        )
+        embed.add_field(name="Moves", value=f"`{opening_data['moves']}`", inline=False)
+        embed.add_field(name="ECO", value=opening_data["eco"], inline=True)
+        embed.add_field(name="Lichess Study", value=f"[Click to Study]({opening_data['lichess_study_url']})", inline=True)
+        
+        message = "♟️ **New Week, New Opening!**\nOur goal this week is to master this opening for our Sunday 1+0 Arena!"
+        await self.safe_send(int(channel_id), content=message, embed=embed)
+
     async def post_daily_puzzle(self) -> None:
         try:
             puzzle = await fetch_daily_puzzle()
@@ -319,6 +337,59 @@ def build_bot(settings: Settings) -> ChessClubBot:
             msg += ". The verified role has been assigned."
 
         await interaction.followup.send(msg, ephemeral=True)
+
+    @bot.tree.command(name="profile", description="Show your Chess Club profile with stats and rank")
+    @app_commands.describe(member="The member to show. Leave blank for yourself.")
+    async def profile_command(interaction: discord.Interaction, member: discord.Member | None = None) -> None:
+        await interaction.response.defer()
+        target = member or interaction.user
+        username = await db.get_chesscom_username_by_discord(str(target.id))
+        
+        if not username:
+            await interaction.followup.send(f"{target.display_name} has not linked their Chess.com account with `/link` yet.")
+            return
+
+        try:
+            stats_data = await fetch_chesscom_stats(username)
+            club_stats = await db.get_user_stats(username)
+        except Exception as e:
+            logger.error(f"Profile error: {e}")
+            await interaction.followup.send("Could not fetch profile data right now.")
+            return
+
+        summary = build_stats_summary(stats_data)
+        
+        embed = discord.Embed(
+            title=f"Chess Club Profile: {target.display_name}",
+            url=f"https://www.chess.com/member/{username}",
+            color=target.color if target.color != discord.Color.default() else discord.Color.blue(),
+        )
+        embed.set_thumbnail(url=target.display_avatar.url)
+        
+        # Club Stats
+        embed.add_field(name="🏆 Club Wins", value=str(club_stats["wins"]), inline=True)
+        embed.add_field(name="🎖️ Podiums", value=str(club_stats["podiums"]), inline=True)
+        embed.add_field(name="⭐ Chess.com", value=username, inline=True)
+        
+        # Ratings
+        ratings_text = []
+        if "Rapid record" in summary: 
+            ratings_text.append(f"**Rapid:** {summary.get('Rapid record', 'N/A').split('  ')[0]} (Rating: {stats_data.stats.get('chess_rapid', {}).get('last', {}).get('rating', 'N/A')})")
+        if "Blitz record" in summary: 
+            ratings_text.append(f"**Blitz:** {summary.get('Blitz record', 'N/A').split('  ')[0]} (Rating: {stats_data.stats.get('chess_blitz', {}).get('last', {}).get('rating', 'N/A')})")
+        
+        if ratings_text:
+            embed.add_field(name="📈 Ratings", value="\n".join(ratings_text), inline=False)
+        
+        # Recent History
+        if club_stats["recent_history"]:
+            history_text = []
+            for t in club_stats["recent_history"]:
+                place = "1st" if t.get("winner", "").lower() == username.lower() else ("2nd" if t.get("runner_up", "").lower() == username.lower() else "3rd")
+                history_text.append(f"• {place} in *{t['name']}*")
+            embed.add_field(name="🕒 Recent Club History", value="\n".join(history_text), inline=False)
+
+        await interaction.followup.send(embed=embed)
 
     @bot.tree.command(name="stats", description="Show Chess.com stats for a player")
     @app_commands.describe(username="Chess.com username. Leave blank to use your linked account.")

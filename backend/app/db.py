@@ -316,17 +316,56 @@ async def delete_announcement(announcement_id: str) -> bool:
 
 # Dynamic Settings
 async def get_app_settings() -> dict[str, Any]:
-    database = get_db()
-    doc = await database.settings.find_one({"_id": "app_config"})
-    if not doc:
-        return {}
-    return doc.get("values", {})
+...
+    return await get_app_settings()
 
-async def update_app_settings(values: dict[str, Any]) -> dict[str, Any]:
+# Opening of the Week
+async def get_current_opening() -> dict[str, Any] | None:
     database = get_db()
-    await database.settings.update_one(
-        {"_id": "app_config"},
-        {"$set": {"values": values}},
+    return await database.openings.find_one({"_id": "current_opening"})
+
+async def set_current_opening(opening: dict[str, Any]) -> None:
+    database = get_db()
+    await database.openings.update_one(
+        {"_id": "current_opening"},
+        {"$set": opening},
         upsert=True
     )
-    return await get_app_settings()
+
+async def get_user_stats(chesscom_username: str) -> dict[str, Any]:
+    database = get_db()
+    # Count wins in finished tournaments
+    wins = await database.tournaments.count_documents({
+        "status": "finished",
+        "winner": {"$regex": f"^{chesscom_username}$", "$options": "i"}
+    })
+    
+    # Count podiums
+    podiums = await database.tournaments.count_documents({
+        "status": "finished",
+        "$or": [
+            {"winner": {"$regex": f"^{chesscom_username}$", "$options": "i"}},
+            {"runner_up": {"$regex": f"^{chesscom_username}$", "$options": "i"}},
+            {"third_place": {"$regex": f"^{chesscom_username}$", "$options": "i"}}
+        ]
+    })
+    
+    # Get last 5 tournaments played
+    # This is a bit simplified - we check if they were in the top 3
+    # A real 'participation' check would require fetching all participants from Chess.com for every tournament
+    cursor = database.tournaments.find({
+        "status": "finished",
+        "$or": [
+            {"winner": {"$regex": f"^{chesscom_username}$", "$options": "i"}},
+            {"runner_up": {"$regex": f"^{chesscom_username}$", "$options": "i"}},
+            {"third_place": {"$regex": f"^{chesscom_username}$", "$options": "i"}}
+        ]
+    }).sort("finished_at", -1).limit(5)
+    
+    history = [_transform_doc(doc) for doc in await cursor.to_list(length=5)]
+    
+    return {
+        "wins": wins,
+        "podiums": podiums,
+        "recent_history": history
+    }

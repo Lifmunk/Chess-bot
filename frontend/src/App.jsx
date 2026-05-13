@@ -82,6 +82,7 @@ function App() {
     discord_announcement_channel_id: "",
     discord_results_channel_id: "",
     discord_puzzle_channel_id: "",
+    discord_opening_channel_id: "",
     discord_greeting_channel_id: "",
     bot_greeting_message: "",
     discord_players_role_id: "",
@@ -1007,10 +1008,11 @@ function App() {
                         
                         <div className="space-y-6">
                           <h3 className="text-xs font-bold text-brand-400 uppercase tracking-widest flex items-center gap-4"><span className="h-px bg-brand-100 flex-1"></span> Channel IDs <span className="h-px bg-brand-100 flex-1"></span></h3>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                             <div className="space-y-1.5"><label className="label text-brand-400">Announcements</label><input className="input text-xs" value={appSettings.discord_announcement_channel_id} onChange={e => setAppSettings({...appSettings, discord_announcement_channel_id: e.target.value})} /></div>
                             <div className="space-y-1.5"><label className="label text-brand-400">Tournament Results</label><input className="input text-xs" value={appSettings.discord_results_channel_id} onChange={e => setAppSettings({...appSettings, discord_results_channel_id: e.target.value})} /></div>
                             <div className="space-y-1.5"><label className="label text-brand-400">Daily Puzzles</label><input className="input text-xs" value={appSettings.discord_puzzle_channel_id} onChange={e => setAppSettings({...appSettings, discord_puzzle_channel_id: e.target.value})} /></div>
+                            <div className="space-y-1.5"><label className="label text-brand-400">Opening of Week</label><input className="input text-xs" value={appSettings.discord_opening_channel_id} onChange={e => setAppSettings({...appSettings, discord_opening_channel_id: e.target.value})} /></div>
                           </div>
                         </div>
 

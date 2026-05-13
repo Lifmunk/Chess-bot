@@ -188,6 +188,8 @@ class DiscordBridge:
 discord_bridge = DiscordBridge(build_bot(settings))
 
 
+from .services.openings import get_random_opening
+...
 async def automation_loop():
     while True:
         try:
@@ -195,6 +197,52 @@ async def automation_loop():
             await discord_bridge.check_reminders()
             await discord_bridge.check_tournament_results()
             await discord_bridge.check_scheduled_announcements()
+            
+            # Opening of the Week & Sunday Arena Logic
+            now = db.utc_now()
+            # 1. Monday Opening Reveal (UTC)
+            if now.weekday() == 0 and now.hour == 9 and now.minute == 0:
+                current = await db.get_current_opening()
+                # Check if we already did this today
+                if not current or current.get("last_updated_date") != now.strftime("%Y-%m-%d"):
+                    opening = get_random_opening()
+                    summary = await ai_service.generate_opening_summary(opening.name, opening.moves)
+                    opening_data = {
+                        "name": opening.name,
+                        "moves": opening.moves,
+                        "eco": opening.eco,
+                        "lichess_study_url": opening.lichess_study_url,
+                        "summary": summary,
+                        "last_updated_date": now.strftime("%Y-%m-%d")
+                    }
+                    await db.set_current_opening(opening_data)
+                    await discord_bridge.bot.announce_opening(opening_data)
+                    logging.info("Announced Opening of the Week: %s", opening.name)
+
+            # 2. Sunday Arena Auto-Schedule (if not exists)
+            if now.weekday() == 6 and now.hour == 18 and now.minute == 0:
+                # Check if Arena for today exists
+                today_str = now.strftime("%Y-%m-%d")
+                tournaments = await db.list_tournaments(status="planned")
+                exists = any(t.get("scheduled_for") and t["scheduled_for"].strftime("%Y-%m-%d") == today_str and "Sunday Arena" in t["name"] for t in tournaments)
+                
+                if not exists:
+                    current_opening = await db.get_current_opening()
+                    opening_name = current_opening["name"] if current_opening else "Weekly"
+                    
+                    # Create Arena record (Admin will need to provide the link manually in UI)
+                    await db.create_tournament({
+                        "name": f"Sunday Arena: {opening_name}",
+                        "chesscom_link": "https://www.chess.com/tournament/live", 
+                        "format": "Arena",
+                        "time_control": "1+0",
+                        "rated": True,
+                        "scheduled_for": now.replace(hour=19, minute=0, second=0, microsecond=0),
+                        "notes": f"Opening of the week: {opening_name}",
+                        "is_automated": True
+                    })
+                    logging.info("Auto-scheduled Sunday Arena for %s", opening_name)
+
         except Exception:
             logging.exception("Error in automation loop")
         await asyncio.sleep(60)

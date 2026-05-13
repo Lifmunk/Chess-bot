@@ -95,6 +95,35 @@ class GroqService:
             {"question": question},
         )
 
+    async def generate_opening_summary(self, opening_name: str, moves: str) -> str:
+        if not self.client:
+            return f"Learn the {opening_name} with these starting moves: {moves}. Good luck!"
+            
+        try:
+            completion = await self.client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are Sarmak, a respected chess grandmaster. "
+                            "Provide educational, concise summaries of chess openings. "
+                            "Focus on the main goals for White and Black."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Provide a brief summary of the chess opening '{opening_name}' ({moves}). Keep it under 100 words.",
+                    },
+                ],
+                temperature=0.7,
+                max_tokens=150,
+            )
+            return completion.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error("Error generating opening summary: %s", e)
+            return f"The {opening_name} is a powerful opening. Master its goals to improve your game!"
+
     def _fallback_message(self, prompt_type: str, context: dict[str, Any]) -> str:
 
         if prompt_type == "tournament_created":
