@@ -188,8 +188,9 @@ class DiscordBridge:
 discord_bridge = DiscordBridge(build_bot(settings))
 
 
+from .services.ai_service import ai_service
 from .services.openings import get_random_opening
-...
+
 async def automation_loop():
     while True:
         try:
