@@ -12,7 +12,7 @@ from discord.ext import commands, tasks
 from .config import Settings
 from . import db
 from .services.chesscom import build_stats_summary, fetch_chesscom_stats
-from .services.lichess import fetch_daily_puzzle, puzzle_message, render_puzzle_jpg
+from .services.lichess import fetch_daily_puzzle, puzzle_message, render_board_to_bytes
 from .services.ai_service import ai_service
 
 
@@ -23,7 +23,8 @@ class ChessClubBot(commands.Bot):
     def __init__(self, settings: Settings):
         intents = discord.Intents.default()
         intents.guilds = True
-        intents.members = True  # Required for role assignment and member lookups
+        intents.members = True
+        intents.presences = True # Required to see who is online
         super().__init__(command_prefix="!", intents=intents)
         self.settings = settings
         self._ready_event = asyncio.Event()
@@ -37,21 +38,23 @@ class ChessClubBot(commands.Bot):
         await self.refresh_settings()
         guild_id = self.dynamic_settings.get("discord_guild_id")
         
+        # We always sync globally to ensure commands are available everywhere.
+        # Global sync can take up to an hour to propagate.
+        try:
+            await self.tree.sync()
+            logger.info("Commands synced globally")
+        except Exception as e:
+            logger.error("Failed to sync commands globally: %s", e)
+        
+        # If a specific guild is configured, we sync to it for immediate updates.
         if guild_id:
             try:
                 guild = discord.Object(id=int(guild_id))
-                # To prevent duplicates (global + guild), we clear global commands first
-                self.tree.clear_commands(guild=None)
-                await self.tree.sync() 
-                
                 self.tree.copy_global_to(guild=guild)
                 await self.tree.sync(guild=guild)
-                logger.info("Commands synced to guild %s (global cleared)", guild_id)
+                logger.info("Commands synced to guild %s (instant sync)", guild_id)
             except Exception as e:
                 logger.warning("Failed to sync commands to guild %s: %s", guild_id, e)
-        else:
-            await self.tree.sync()
-            logger.info("Commands synced globally")
         
         if not self.daily_puzzle_loop.is_running():
             self.daily_puzzle_loop.start()
@@ -70,6 +73,10 @@ class ChessClubBot(commands.Bot):
 
     async def on_ready(self) -> None:
         logger.info("Discord bot ready as %s", self.user)
+        logger.info("Bot is in %s guilds", len(self.guilds))
+        for guild in self.guilds:
+            logger.info(" - %s (ID: %s)", guild.name, guild.id)
+            
         self._ready_event.set()
         # Start greeting task
         asyncio.create_task(self.delayed_greeting())
@@ -244,10 +251,13 @@ class ChessClubBot(commands.Bot):
             return
 
         content = puzzle_message(puzzle)
-        # Store solution for interactive solving
-        await db.set_active_puzzle(puzzle.puzzle_id, puzzle.solution)
+        await db.set_active_puzzle(puzzle.puzzle_id, puzzle.solution, puzzle.fen)
 
-        await self.safe_send(self.puzzle_channel_id(), content=content)
+        # Render image
+        image_buf = render_board_to_bytes(puzzle.fen, puzzle.last_move)
+        file = discord.File(image_buf, filename=f"puzzle_{puzzle.puzzle_id}.png")
+
+        await self.safe_send(self.puzzle_channel_id(), content=content, file=file)
 
     @tasks.loop(hours=24)
     async def daily_puzzle_loop(self) -> None:
@@ -441,33 +451,6 @@ def build_bot(settings: Settings) -> ChessClubBot:
         if message.author.bot:
             return
 
-        # Interactive Puzzle Solving
-        if message.channel.id == bot.puzzle_channel_id():
-            active = await db.get_active_puzzle()
-            if active and active.get("solution"):
-                # Check if message matches the first move of the solution
-                content = message.content.strip().lower()
-                solution = active["solution"]
-
-                # Check if user already solved it
-                if str(message.author.id) in active.get("solved_by", []):
-                    # Silently ignore or maybe a small react?
-                    return
-
-                if content == solution[0].lower():
-                    # Correct first move!
-                    first_time = await db.mark_puzzle_solved(active["puzzle_id"], str(message.author.id))
-                    if first_time:
-                        await message.add_reaction("✅")
-                        # Optional: Respond with next part or just congrats
-                        if len(solution) > 1:
-                            await message.reply(f"Correct! The full solution is: `{' '.join(solution)}`")
-                        else:
-                            await message.reply("Spot on! You solved today's puzzle.")
-                elif len(content) >= 4 and any(s.lower() == content for s in solution):
-                    # They sent a later move or the whole thing?
-                     await message.add_reaction("❌")
-
         # AI Mention Logic
         if bot.user in message.mentions:
             content = message.content.replace(f"<@!{bot.user.id}>", "").replace(f"<@{bot.user.id}>", "").strip()
@@ -481,18 +464,243 @@ def build_bot(settings: Settings) -> ChessClubBot:
 
         await bot.process_commands(message)
 
-    @bot.tree.command(name="puzzle", description="Post today's Lichess puzzle in this channel")
-    async def puzzle_command(interaction: discord.Interaction) -> None:
+    @bot.tree.command(name="match", description="Seek an opponent for a chess match")
+    @app_commands.describe(time_control="Preferred time control (e.g., 10+0, 3+2, 1+0)")
+    async def match_command(interaction: discord.Interaction, time_control: str) -> None:
         await interaction.response.defer()
-        try:
-            puzzle = await fetch_daily_puzzle()
-        except Exception:
-            await interaction.followup.send("I could not fetch the puzzle right now.")
+        
+        discord_id = str(interaction.user.id)
+        username = await db.get_chesscom_username_by_discord(discord_id)
+        
+        if not username:
+            await interaction.followup.send("You must link your Chess.com account with `/link` first.")
+            return
+            
+        # Check if already seeking
+        existing = await db.get_user_match_seek(discord_id)
+        if existing:
+            await interaction.followup.send(f"You are already seeking a match for `{existing['time_control']}`. Use `/match_cancel` to stop.")
             return
 
-        content = puzzle_message(puzzle)
-        await db.set_active_puzzle(puzzle.puzzle_id, puzzle.solution)
-        await interaction.followup.send(content=content)
+        try:
+            stats = await fetch_chesscom_stats(username)
+            # Use max of rapid/blitz for matching
+            rapid = stats.stats.get("chess_rapid", {}).get("last", {}).get("rating", 1200)
+            blitz = stats.stats.get("chess_blitz", {}).get("last", {}).get("rating", 1200)
+            user_rating = max(rapid, blitz)
+        except Exception:
+            user_rating = 1200
+
+        await db.add_match_seek(discord_id, username, user_rating, time_control)
+        
+        # Search for online linked users with similar rating
+        guild = interaction.guild
+        if not guild:
+            await interaction.followup.send(f"Seeking match for `{time_control}`. (Run this in a server to find opponents)")
+            return
+
+        candidates = []
+        all_linked = await db.list_users()
+        linked_ids = {u["discord_id"] for u in all_linked}
+        
+        for member in guild.members:
+            if member.bot or str(member.id) == discord_id:
+                continue
+            
+            if str(member.id) not in linked_ids:
+                continue
+                
+            # Check online status (needs presences intent)
+            if member.status == discord.Status.offline:
+                continue
+                
+            # Fetch candidate rating
+            c_username = next(u["chesscom_username"] for u in all_linked if u["discord_id"] == str(member.id))
+            try:
+                # In a real high-traffic bot, we'd cache these ratings
+                c_stats = await fetch_chesscom_stats(c_username)
+                c_rapid = c_stats.stats.get("chess_rapid", {}).get("last", {}).get("rating", 1200)
+                c_blitz = c_stats.stats.get("chess_blitz", {}).get("last", {}).get("rating", 1200)
+                c_rating = max(c_rapid, c_blitz)
+                
+                diff = c_rating - user_rating
+                if abs(diff) <= 200:
+                    diff_str = f"+{diff}" if diff >= 0 else str(diff)
+                    candidates.append((member, diff_str))
+            except Exception:
+                continue
+
+        if not candidates:
+            await interaction.followup.send(f"Challenge seek started for `{time_control}`. No similar-rated players are online right now, I will let you know if someone joins!")
+            return
+
+        pings = " ".join([m.mention for m, _ in candidates])
+        lines = [f"{m.display_name} ({d})" for m, d in candidates]
+        
+        embed = discord.Embed(
+            title="⚔️ Match Challenge Seek",
+            description=f"**{interaction.user.display_name}** is looking for a **{time_control}** match!",
+            color=discord.Color.red()
+        )
+        embed.add_field(name="Possible Opponents", value="\n".join(lines))
+        embed.set_footer(text="Use /match_cancel to stop seeking.")
+        
+        await interaction.followup.send(content=f"{pings}\n**{interaction.user.display_name}** has challenged you!", embed=embed)
+
+    @bot.tree.command(name="match_cancel", description="Cancel your active match challenge seek")
+    async def match_cancel(interaction: discord.Interaction) -> None:
+        deleted = await db.remove_match_seek(str(interaction.user.id))
+        if deleted:
+            await interaction.response.send_message("Your match challenge seek has been cancelled.", ephemeral=True)
+        else:
+            await interaction.response.send_message("You don't have an active match seek.", ephemeral=True)
+
+    @bot.tree.command(name="help", description="List all available commands")
+    async def help_command(interaction: discord.Interaction) -> None:
+        embed = discord.Embed(
+            title="♟️ Chess Club Bot Help",
+            description="Here are the available slash commands:",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="/match", value="Seek a chess match with similar-rated online players", inline=False)
+        embed.add_field(name="/match_cancel", value="Cancel your active match seek", inline=False)
+        embed.add_field(name="/profile", value="Show your Chess Club profile with stats and ratings", inline=False)
+        embed.add_field(name="/rank", value="Show your current club rank and wins", inline=False)
+        embed.add_field(name="/link", value="Link your Chess.com username", inline=False)
+        embed.add_field(name="/leaderboard", value="Show the top club players by tournament wins", inline=False)
+        embed.add_field(name="/ask", value="Ask the AI Grandmaster a question", inline=False)
+        embed.add_field(name="/puzzle", value="Post today's Lichess puzzle", inline=False)
+        embed.add_field(name="/puzzle_leaderboard", value="Show the top puzzle solvers", inline=False)
+        embed.add_field(name="/compare", value="Compare your stats with another member", inline=False)
+        embed.add_field(name="/next", value="Show the details of the next scheduled tournament", inline=False)
+        embed.add_field(name="/opening", value="Show the current opening of the week", inline=False)
+        embed.add_field(name="/about", value="Information about the Chess Club and Bot", inline=False)
+        await interaction.response.send_message(embed=embed)
+
+    @bot.tree.command(name="about", description="Information about the Chess Club and Bot")
+    async def about_command(interaction: discord.Interaction) -> None:
+        embed = discord.Embed(
+            title="About Chess Club Bot",
+            description="This bot is designed to manage our Chess Club activities, track tournament results, and keep the community engaged with puzzles and AI insights.",
+            color=discord.Color.green()
+        )
+        embed.add_field(name="Features", value="• Automated Tournament Announcements\n• Chess.com Integration\n• Daily Lichess Puzzles\n• AI-powered Chess Advice", inline=False)
+        embed.add_field(name="Created for", value="The Official Chess Club community.", inline=False)
+        await interaction.response.send_message(embed=embed)
+
+    @bot.tree.command(name="opening", description="Show the current opening of the week")
+    async def opening_command(interaction: discord.Interaction) -> None:
+        opening_data = await db.get_current_opening()
+        if not opening_data:
+            await interaction.response.send_message("No opening of the week has been set yet.")
+            return
+
+        embed = discord.Embed(
+            title=f"Opening of the Week: {opening_data['name']}",
+            description=opening_data["summary"],
+            color=discord.Color.blue(),
+        )
+        embed.add_field(name="Moves", value=f"`{opening_data['moves']}`", inline=False)
+        embed.add_field(name="ECO", value=opening_data["eco"], inline=True)
+        embed.add_field(name="Lichess Study", value=f"[Click to Study]({opening_data['lichess_study_url']})", inline=True)
+        await interaction.response.send_message(embed=embed)
+
+    @bot.tree.command(name="rank", description="Show your current club rank and wins")
+    async def rank_command(interaction: discord.Interaction, member: discord.Member | None = None) -> None:
+        target = member or interaction.user
+        username = await db.get_chesscom_username_by_discord(str(target.id))
+        
+        if not username:
+            await interaction.response.send_message(f"{target.display_name} has not linked their account with `/link` yet.")
+            return
+
+        club_stats = await db.get_user_stats(username)
+        leaders = await db.get_leaderboard(limit=100)
+        
+        rank = "Unranked"
+        for i, l in enumerate(leaders):
+            if l['username'].lower() == username.lower():
+                rank = f"#{i+1}"
+                break
+        
+        embed = discord.Embed(
+            title=f"Rank: {target.display_name}",
+            color=discord.Color.gold()
+        )
+        embed.add_field(name="Chess.com", value=username, inline=True)
+        embed.add_field(name="Club Wins", value=str(club_stats["wins"]), inline=True)
+        embed.add_field(name="Club Rank", value=rank, inline=True)
+        await interaction.response.send_message(embed=embed)
+        
+    @bot.tree.command(name="sync", description="Admin only: Force sync slash commands")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def sync_commands(interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await bot.setup_hook()
+            await interaction.followup.send("Commands synced successfully!", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"Failed to sync: {e}", ephemeral=True)
+
+    @bot.tree.command(name="ask", description="Ask the AI Grandmaster anything chess-related")
+    @app_commands.describe(question="Your question for the Grandmaster")
+    async def ask_command(interaction: discord.Interaction, question: str) -> None:
+        await interaction.response.defer()
+        answer = await ai_service.ask_funny_question(question)
+        await interaction.followup.send(answer)
+
+    @bot.tree.command(name="solve", description="Attempt to solve the current puzzle")
+    @app_commands.describe(puzzle_id="The ID of the puzzle", move="Your move in UCI format (e.g., e2e4)")
+    async def solve_command(interaction: discord.Interaction, puzzle_id: str, move: str) -> None:
+        # Ephemeral response to keep solving private
+        await interaction.response.defer(ephemeral=True)
+        
+        active = await db.get_active_puzzle()
+        if not active or active["puzzle_id"] != puzzle_id:
+            await interaction.followup.send("This puzzle is no longer active or the ID is incorrect.", ephemeral=True)
+            return
+        
+        attempt = await db.get_puzzle_attempt(str(interaction.user.id))
+        if attempt and attempt["puzzle_id"] != puzzle_id:
+            # If they start a new puzzle, clear the old one
+            await db.clear_puzzle_attempt(str(interaction.user.id))
+            attempt = None
+            
+        current_idx = attempt["current_move_index"] if attempt else 0
+        solution = active["solution"]
+        
+        user_move = move.strip().lower()
+        
+        if user_move == solution[current_idx].lower():
+            # Correct move!
+            points = 1
+            is_last = (current_idx + 1) >= len(solution)
+            
+            if is_last:
+                points += 5 # Bonus for completing
+                await db.mark_puzzle_solved(puzzle_id, str(interaction.user.id), points)
+                await db.clear_puzzle_attempt(str(interaction.user.id))
+                await interaction.followup.send(f"✅ **Correct!** That was the final move. You've solved the puzzle! (+{points} points)", ephemeral=True)
+            else:
+                # Bot moves are usually at odd indices: [user_0, bot_1, user_2, bot_3...]
+                # So if current_idx is 0 (user), then bot is 1, and next user is 2.
+                bot_move = solution[current_idx + 1]
+                next_user_move_idx = current_idx + 2
+                
+                if next_user_move_idx >= len(solution):
+                    # Only one move left and it was the bot's? No, solution always ends with user move usually.
+                    # But if it ends with bot move for some reason:
+                    await db.mark_puzzle_solved(puzzle_id, str(interaction.user.id), points)
+                    await db.clear_puzzle_attempt(str(interaction.user.id))
+                    await interaction.followup.send(f"✅ **Correct!** The opponent responded with `{bot_move}`. Puzzle solved! (+{points} points)", ephemeral=True)
+                else:
+                    await db.set_puzzle_attempt(str(interaction.user.id), puzzle_id, next_user_move_idx)
+                    await db.mark_puzzle_solved(puzzle_id, str(interaction.user.id), 1) # +1 for current correct move
+                    await interaction.followup.send(f"✅ **Correct!** The opponent responded with `{bot_move}`. What is your next move?", ephemeral=True)
+        else:
+            # Wrong move
+            await db.clear_puzzle_attempt(str(interaction.user.id))
+            await interaction.followup.send(f"❌ **Wrong move.** The puzzle solving attempt has ended.", ephemeral=True)
 
     @bot.tree.command(name="puzzle_leaderboard", description="Show the top puzzle solvers")
     async def puzzle_leaderboard(interaction: discord.Interaction) -> None:
@@ -503,7 +711,8 @@ def build_bot(settings: Settings) -> ChessClubBot:
 
         lines = []
         for i, l in enumerate(leaders):
-            lines.append(f"**{i+1}.** <@{l['discord_id']}> — {l['solves']} solves")
+            points = l.get('points', 0)
+            lines.append(f"**{i+1}.** <@{l['discord_id']}> — {l['solves']} solves ({points} pts)")
 
         embed = discord.Embed(
             title="🧩 Puzzle Leaderboard",
@@ -551,6 +760,89 @@ def build_bot(settings: Settings) -> ChessClubBot:
         await interaction.followup.send(embed=embed)
 
 
+    async def update_member_roles(self, discord_id: str) -> None:
+        """Update both verified and rating roles for a member immediately."""
+        guild_id = self.dynamic_settings.get("discord_guild_id")
+        if not guild_id:
+            return
+            
+        guild = self.get_guild(int(guild_id))
+        if not guild:
+            return
+            
+        try:
+            member = guild.get_member(int(discord_id)) or await guild.fetch_member(int(discord_id))
+        except Exception:
+            return
+
+        # 1. Verified Role
+        verified_role_id = self.dynamic_settings.get("discord_verified_role_id")
+        if verified_role_id:
+            role = guild.get_role(int(verified_role_id))
+            if role and role not in member.roles:
+                try:
+                    await member.add_roles(role)
+                except Exception:
+                    pass
+
+        # 2. Rating Roles
+        username = await db.get_chesscom_username_by_discord(discord_id)
+        if not username:
+            return
+
+        try:
+            stats = await fetch_chesscom_stats(username)
+            rapid = stats.stats.get("chess_rapid", {}).get("last", {}).get("rating", 0)
+            blitz = stats.stats.get("chess_blitz", {}).get("last", {}).get("rating", 0)
+            rating = max(rapid, blitz)
+
+            role_mapping = {
+                "discord_expert_role_id": 2000,
+                "discord_intermediate_role_id": 1200,
+                "discord_beginner_role_id": 0
+            }
+
+            roles = {}
+            for key, min_rating in role_mapping.items():
+                rid = self.dynamic_settings.get(key)
+                if rid:
+                    r = guild.get_role(int(rid))
+                    if r:
+                        roles[min_rating] = r
+
+            if roles:
+                best_role = None
+                for min_rating in sorted(roles.keys(), reverse=True):
+                    if rating >= min_rating:
+                        best_role = roles[min_rating]
+                        break
+                
+                if best_role:
+                    to_remove = [r for r in roles.values() if r in member.roles and r != best_role]
+                    if to_remove:
+                        await member.remove_roles(*to_remove)
+                    if best_role not in member.roles:
+                        await member.add_roles(best_role)
+        except Exception:
+            pass
+
+    def get_guild_channels(self) -> list[dict[str, Any]]:
+        guild_id = self.dynamic_settings.get("discord_guild_id")
+        if not guild_id:
+            return []
+        guild = self.get_guild(int(guild_id))
+        if not guild:
+            return []
+            
+        channels = []
+        for channel in guild.text_channels:
+            channels.append({
+                "id": str(channel.id),
+                "name": channel.name,
+                "category": channel.category.name if channel.category else None
+            })
+        return sorted(channels, key=lambda x: (x["category"] or "", x["name"]))
+
     @bot.tree.command(name="link", description="Link your Chess.com username to your Discord account")
     @app_commands.describe(username="Your Chess.com username")
     async def link_command(interaction: discord.Interaction, username: str) -> None:
@@ -569,29 +861,9 @@ def build_bot(settings: Settings) -> ChessClubBot:
             return
 
         await db.link_user(str(interaction.user.id), username)
+        await bot.update_member_roles(str(interaction.user.id))
 
-        role_added = False
-        verified_role_id = bot.dynamic_settings.get("discord_verified_role_id")
-        guild_id = bot.dynamic_settings.get("discord_guild_id")
-        if verified_role_id and guild_id:
-            guild = bot.get_guild(int(guild_id))
-            if guild:
-                member = interaction.user
-                role = guild.get_role(int(verified_role_id))
-                if role:
-                    try:
-                        await member.add_roles(role)
-                        role_added = True
-                    except discord.Forbidden:
-                        logger.warning("Bot lacks permission to assign verified role")
-                    except Exception as e:
-                        logger.warning("Failed to assign verified role: %s", e)
-
-        msg = f"Chess.com username linked: `{username}`"
-        if role_added:
-            msg += ". The verified role has been assigned."
-
-        await interaction.followup.send(msg, ephemeral=True)
+        await interaction.followup.send(f"Chess.com username linked: `{username}`. Your roles have been updated.", ephemeral=True)
 
     @bot.tree.command(name="profile", description="Show your Chess Club profile with stats and ratings")
     @app_commands.describe(member="The member to show. Leave blank for yourself.")

@@ -345,46 +345,90 @@ async def set_current_opening(opening: dict[str, Any]) -> None:
     )
 
 # Puzzle Tracking
-async def set_active_puzzle(puzzle_id: str, solution: list[str]) -> None:
+async def set_active_puzzle(puzzle_id: str, solution: list[str], fen: str) -> None:
     database = get_db()
     await database.puzzles.update_one(
         {"_id": "active"},
         {"$set": {
             "puzzle_id": puzzle_id,
             "solution": solution,
+            "fen": fen,
             "solved_by": [],
             "created_at": utc_now()
         }},
         upsert=True
     )
 
-async def get_active_puzzle() -> dict[str, Any] | None:
+async def set_puzzle_attempt(discord_id: str, puzzle_id: str, current_move_index: int) -> None:
     database = get_db()
-    return await database.puzzles.find_one({"_id": "active"})
+    await database.puzzle_attempts.update_one(
+        {"discord_id": discord_id},
+        {"$set": {
+            "puzzle_id": puzzle_id,
+            "current_move_index": current_move_index,
+            "updated_at": utc_now()
+        }},
+        upsert=True
+    )
 
-async def mark_puzzle_solved(puzzle_id: str, discord_id: str) -> bool:
+async def get_puzzle_attempt(discord_id: str) -> dict[str, Any] | None:
+    database = get_db()
+    return await database.puzzle_attempts.find_one({"discord_id": discord_id})
+
+async def clear_puzzle_attempt(discord_id: str) -> None:
+    database = get_db()
+    await database.puzzle_attempts.delete_one({"discord_id": discord_id})
+
+async def mark_puzzle_solved(puzzle_id: str, discord_id: str, points: int = 1) -> bool:
     """Returns True if this is the first time the user solved this puzzle."""
     database = get_db()
     res = await database.puzzles.update_one(
         {"_id": "active", "puzzle_id": puzzle_id, "solved_by": {"$ne": discord_id}},
         {"$push": {"solved_by": discord_id}}
     )
-    if res.modified_count > 0:
-        # Increment leaderboard
-        await database.puzzle_leaderboard.update_one(
-            {"discord_id": discord_id},
-            {"$inc": {"solves": 1}, "$set": {"updated_at": utc_now()}},
-            upsert=True
-        )
-        return True
-    return False
+    # Even if they already solved it, we might want to update their total points if it's a new solve?
+    # User said: "Store points of user in database based on how many correct moves they played in puzzle (+1) if correct all moves (extra +5)"
+    # We should have a separate field for puzzle points.
+    
+    await database.puzzle_leaderboard.update_one(
+        {"discord_id": discord_id},
+        {"$inc": {"solves": 1 if res.modified_count > 0 else 0, "points": points}, "$set": {"updated_at": utc_now()}},
+        upsert=True
+    )
+    return res.modified_count > 0
 
 async def get_puzzle_leaderboard(limit: int = 10) -> list[dict[str, Any]]:
     database = get_db()
     cursor = database.puzzle_leaderboard.find({}).sort("solves", -1).limit(limit)
     return await cursor.to_list(length=limit)
 
-# Player Snapshots (Fair Play & Most Improved)
+# Matchmaking
+async def add_match_seek(discord_id: str, username: str, rating: int, time_control: str) -> None:
+    database = get_db()
+    await database.match_seeks.update_one(
+        {"discord_id": discord_id},
+        {"$set": {
+            "username": username,
+            "rating": rating,
+            "time_control": time_control,
+            "created_at": utc_now()
+        }},
+        upsert=True
+    )
+
+async def remove_match_seek(discord_id: str) -> bool:
+    database = get_db()
+    res = await database.match_seeks.delete_one({"discord_id": discord_id})
+    return res.deleted_count > 0
+
+async def get_user_match_seek(discord_id: str) -> dict[str, Any] | None:
+    database = get_db()
+    return await database.match_seeks.find_one({"discord_id": discord_id})
+
+async def get_all_match_seeks() -> list[dict[str, Any]]:
+    database = get_db()
+    cursor = database.match_seeks.find({})
+    return await cursor.to_list(length=100)
 async def update_player_snapshot(discord_id: str, username: str, status: str, rating: int) -> dict[str, Any] | None:
     database = get_db()
     now = utc_now()

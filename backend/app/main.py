@@ -455,11 +455,22 @@ async def manual_link_user(
     _: dict = Depends(require_admin),
 ) -> UserOut:
     await db.link_user(payload.discord_id, payload.chesscom_username)
+    # Trigger role update if bot is ready
+    if hasattr(app.state, "discord") and app.state.discord.bot:
+        asyncio.create_task(app.state.discord.bot.update_member_roles(payload.discord_id))
+        
     return UserOut(
         discord_id=payload.discord_id,
         chesscom_username=payload.chesscom_username,
         updated_at=db.utc_now()
     )
+
+
+@app.get("/discord/channels")
+async def get_discord_channels(_: dict = Depends(require_admin)):
+    if hasattr(app.state, "discord") and app.state.discord.bot:
+        return app.state.discord.bot.get_guild_channels()
+    return []
 
 
 @app.delete("/users/{discord_id}", status_code=status.HTTP_204_NO_CONTENT)

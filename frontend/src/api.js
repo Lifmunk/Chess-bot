@@ -142,6 +142,10 @@ export function updateSettings(token, payload) {
   return request("/settings", { token, method: "POST", body: payload });
 }
 
+export function getDiscordChannels(token) {
+  return request("/discord/channels", { token });
+}
+
 export function getTest() {
   return request("/test");
 }

@@ -24,6 +24,7 @@ import {
   sendAnnouncementNow,
   getSettings,
   updateSettings,
+  getDiscordChannels,
 } from "./api";
 
 const emptyForm = {
@@ -77,6 +78,7 @@ function App() {
   const [leaderboard, setLeaderboard] = useState([]);
   const [users, setUsers] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
+  const [discordChannels, setDiscordChannels] = useState([]);
   const [appSettings, setAppSettings] = useState({
     discord_guild_id: "",
     discord_announcement_channel_id: "",
@@ -170,11 +172,22 @@ function App() {
     }
   };
 
+  const fetchDiscordChannels = async () => {
+    if (!token || !user) return;
+    try {
+      const channels = await getDiscordChannels(token);
+      setDiscordChannels(channels || []);
+    } catch (err) {
+      console.error("Channels fetch failed", err);
+    }
+  };
+
   const fetchAppSettings = async () => {
     if (!token || !user) return;
     try {
       const data = await getSettings(token);
       setAppSettings(prev => ({ ...prev, ...data }));
+      fetchDiscordChannels();
     } catch (err) {
       console.error("Settings fetch failed", err);
     }
@@ -212,6 +225,7 @@ function App() {
       fetchUsers();
     } else if (activeTab === 'announce') {
       fetchAnnouncements();
+      fetchDiscordChannels();
     } else if (activeTab === 'settings') {
       fetchAppSettings();
     }
@@ -450,6 +464,25 @@ function App() {
     setToken("");
     setUser(null);
   }
+
+  const ChannelSelect = ({ value, onChange, label, className = "" }) => (
+    <div className={`space-y-1.5 ${className}`}>
+      {label && <label className="label">{label}</label>}
+      <select 
+        className="input appearance-none bg-no-repeat bg-[right_1rem_center] bg-[length:1em_1em]"
+        style={{ backgroundImage: "url('data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22 fill=%22none%22 viewBox=%220%22 stroke=%22currentColor%22%3E%3Cpath stroke-linecap=%22round%22 stroke-linejoin=%22round%22 stroke-width=%222%22 d=%22m19 9-7 7-7-7%22%2F%3E%3C%2Fsvg%3E')" }}
+        value={value} 
+        onChange={onChange}
+      >
+        <option value="">Select a channel...</option>
+        {discordChannels.map(ch => (
+          <option key={ch.id} value={ch.id}>
+            {ch.category ? `[${ch.category}] ` : ""}#{ch.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 
   function startEditing() {
     if (!selectedTournament) return;
@@ -871,10 +904,7 @@ function App() {
                 
                 <form className="space-y-8" onSubmit={handleAnnounce}>
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div className="space-y-1.5">
-                      <label className="label">Target Channel ID</label>
-                      <input className="input" placeholder="000000000000000000" value={announcementForm.channel_id} onChange={e => setAnnouncementForm({...announcementForm, channel_id: e.target.value})} required />
-                    </div>
+                    <ChannelSelect label="Target Channel" value={announcementForm.channel_id} onChange={e => setAnnouncementForm({...announcementForm, channel_id: e.target.value})} />
                     <div className="space-y-1.5">
                       <label className="label">Schedule Date (Optional)</label>
                       <input className="input" type="date" value={announcementForm.scheduled_date} onChange={e => setAnnouncementForm({...announcementForm, scheduled_date: e.target.value})} />
@@ -1005,17 +1035,17 @@ function App() {
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-1.5"><label className="label">Startup Greeting Channel ID</label><input className="input" value={appSettings.discord_greeting_channel_id} onChange={e => setAppSettings({...appSettings, discord_greeting_channel_id: e.target.value})} placeholder="000000000000000000" /></div>
+                            <ChannelSelect label="Startup Greeting Channel" value={appSettings.discord_greeting_channel_id} onChange={e => setAppSettings({...appSettings, discord_greeting_channel_id: e.target.value})} />
                             <div className="space-y-1.5"><label className="label">Greeting Message</label><input className="input" value={appSettings.bot_greeting_message} onChange={e => setAppSettings({...appSettings, bot_greeting_message: e.target.value})} placeholder="Grandmaster is online! ♟️" /></div>
                         </div>
                         
                         <div className="space-y-6">
-                          <h3 className="text-xs font-bold text-brand-400 uppercase tracking-widest flex items-center gap-4"><span className="h-px bg-brand-100 flex-1"></span> Channel IDs <span className="h-px bg-brand-100 flex-1"></span></h3>
+                          <h3 className="text-xs font-bold text-brand-400 uppercase tracking-widest flex items-center gap-4"><span className="h-px bg-brand-100 flex-1"></span> Channel Selections <span className="h-px bg-brand-100 flex-1"></span></h3>
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                            <div className="space-y-1.5"><label className="label text-brand-400">Announcements</label><input className="input text-xs" value={appSettings.discord_announcement_channel_id} onChange={e => setAppSettings({...appSettings, discord_announcement_channel_id: e.target.value})} /></div>
-                            <div className="space-y-1.5"><label className="label text-brand-400">Tournament Results</label><input className="input text-xs" value={appSettings.discord_results_channel_id} onChange={e => setAppSettings({...appSettings, discord_results_channel_id: e.target.value})} /></div>
-                            <div className="space-y-1.5"><label className="label text-brand-400">Daily Puzzles</label><input className="input text-xs" value={appSettings.discord_puzzle_channel_id} onChange={e => setAppSettings({...appSettings, discord_puzzle_channel_id: e.target.value})} /></div>
-                            <div className="space-y-1.5"><label className="label text-brand-400">Opening of Week</label><input className="input text-xs" value={appSettings.discord_opening_channel_id} onChange={e => setAppSettings({...appSettings, discord_opening_channel_id: e.target.value})} /></div>
+                            <ChannelSelect label="Announcements" value={appSettings.discord_announcement_channel_id} onChange={e => setAppSettings({...appSettings, discord_announcement_channel_id: e.target.value})} />
+                            <ChannelSelect label="Tournament Results" value={appSettings.discord_results_channel_id} onChange={e => setAppSettings({...appSettings, discord_results_channel_id: e.target.value})} />
+                            <ChannelSelect label="Daily Puzzles" value={appSettings.discord_puzzle_channel_id} onChange={e => setAppSettings({...appSettings, discord_puzzle_channel_id: e.target.value})} />
+                            <ChannelSelect label="Opening of Week" value={appSettings.discord_opening_channel_id} onChange={e => setAppSettings({...appSettings, discord_opening_channel_id: e.target.value})} />
                           </div>
                         </div>
 
