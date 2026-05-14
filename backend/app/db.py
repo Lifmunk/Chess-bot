@@ -344,6 +344,116 @@ async def set_current_opening(opening: dict[str, Any]) -> None:
         upsert=True
     )
 
+# Puzzle Tracking
+async def set_active_puzzle(puzzle_id: str, solution: list[str]) -> None:
+    database = get_db()
+    await database.puzzles.update_one(
+        {"_id": "active"},
+        {"$set": {
+            "puzzle_id": puzzle_id,
+            "solution": solution,
+            "solved_by": [],
+            "created_at": utc_now()
+        }},
+        upsert=True
+    )
+
+async def get_active_puzzle() -> dict[str, Any] | None:
+    database = get_db()
+    return await database.puzzles.find_one({"_id": "active"})
+
+async def mark_puzzle_solved(puzzle_id: str, discord_id: str) -> bool:
+    """Returns True if this is the first time the user solved this puzzle."""
+    database = get_db()
+    res = await database.puzzles.update_one(
+        {"_id": "active", "puzzle_id": puzzle_id, "solved_by": {"$ne": discord_id}},
+        {"$push": {"solved_by": discord_id}}
+    )
+    if res.modified_count > 0:
+        # Increment leaderboard
+        await database.puzzle_leaderboard.update_one(
+            {"discord_id": discord_id},
+            {"$inc": {"solves": 1}, "$set": {"updated_at": utc_now()}},
+            upsert=True
+        )
+        return True
+    return False
+
+async def get_puzzle_leaderboard(limit: int = 10) -> list[dict[str, Any]]:
+    database = get_db()
+    cursor = database.puzzle_leaderboard.find({}).sort("solves", -1).limit(limit)
+    return await cursor.to_list(length=limit)
+
+# Player Snapshots (Fair Play & Most Improved)
+async def update_player_snapshot(discord_id: str, username: str, status: str, rating: int) -> dict[str, Any] | None:
+    database = get_db()
+    now = utc_now()
+    
+    # Get previous snapshot to detect status change or rating diff
+    prev = await database.player_snapshots.find_one({"discord_id": discord_id})
+    
+    doc = {
+        "discord_id": discord_id,
+        "username": username,
+        "status": status,
+        "rating": rating,
+        "last_updated": now
+    }
+    
+    # Track rating history for weekly reports (store last 7 days of peaks)
+    if not prev or prev.get("rating") != rating:
+        await database.rating_history.insert_one({
+            "discord_id": discord_id,
+            "rating": rating,
+            "timestamp": now
+        })
+
+    await database.player_snapshots.update_one(
+        {"discord_id": discord_id},
+        {"$set": doc},
+        upsert=True
+    )
+    return prev
+
+async def get_weekly_rating_diffs() -> list[dict[str, Any]]:
+    database = get_db()
+    seven_days_ago = utc_now() - timedelta(days=7)
+    
+    # This is a bit complex for a simple query, we'll fetch all users and their history
+    users = await list_users()
+    results = []
+    
+    for user in users:
+        did = user["discord_id"]
+        # Get earliest rating in last 7-8 days
+        start_cursor = database.rating_history.find({"discord_id": did, "timestamp": {"$gte": seven_days_ago}}).sort("timestamp", 1).limit(1)
+        start_list = await start_cursor.to_list(length=1)
+        
+        # Get latest rating
+        end_cursor = database.rating_history.find({"discord_id": did}).sort("timestamp", -1).limit(1)
+        end_list = await end_cursor.to_list(length=1)
+        
+        if start_list and end_list:
+            diff = end_list[0]["rating"] - start_list[0]["rating"]
+            results.append({
+                "username": user["chesscom_username"],
+                "discord_id": did,
+                "start_rating": start_list[0]["rating"],
+                "end_rating": end_list[0]["rating"],
+                "diff": diff
+            })
+    
+    return sorted(results, key=lambda x: x["diff"], reverse=True)
+
+async def get_recent_winners(days: int = 7) -> list[dict[str, Any]]:
+    database = get_db()
+    threshold = utc_now() - timedelta(days=days)
+    cursor = database.tournaments.find({
+        "status": "finished",
+        "finished_at": {"$gte": threshold}
+    })
+    return [_transform_doc(doc) for doc in await cursor.to_list(length=100)]
+
 async def get_user_stats(chesscom_username: str) -> dict[str, Any]:
     database = get_db()
     # Count wins in finished tournaments

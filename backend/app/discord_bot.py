@@ -55,6 +55,12 @@ class ChessClubBot(commands.Bot):
         if not self.rating_roles_loop.is_running():
             self.rating_roles_loop.start()
 
+        if not self.monitoring_loop.is_running():
+            self.monitoring_loop.start()
+            
+        if not self.weekly_report_loop.is_running():
+            self.weekly_report_loop.start()
+
     async def on_ready(self) -> None:
         logger.info("Discord bot ready as %s", self.user)
         self._ready_event.set()
@@ -231,15 +237,10 @@ class ChessClubBot(commands.Bot):
             return
 
         content = puzzle_message(puzzle)
-        jpg_path = render_puzzle_jpg(puzzle)
-        try:
-            file = discord.File(str(jpg_path), filename="puzzle.jpg")
-            await self.safe_send(self.puzzle_channel_id(), content=content, file=file)
-        finally:
-            try:
-                jpg_path.unlink(missing_ok=True)
-            except OSError:
-                logger.warning("Failed to remove temporary puzzle image %s", jpg_path)
+        # Store solution for interactive solving
+        await db.set_active_puzzle(puzzle.puzzle_id, puzzle.solution)
+
+        await self.safe_send(self.puzzle_channel_id(), content=content)
 
     @tasks.loop(hours=24)
     async def daily_puzzle_loop(self) -> None:
@@ -251,7 +252,7 @@ class ChessClubBot(commands.Bot):
         guild_id = self.dynamic_settings.get("discord_guild_id")
         verified_role_id = self.dynamic_settings.get("discord_verified_role_id")
         club_id = self.dynamic_settings.get("chesscom_club_id")
-        
+
         if not (guild_id and verified_role_id and club_id):
             return
 
@@ -265,11 +266,11 @@ class ChessClubBot(commands.Bot):
 
         from .services.chesscom import is_player_in_club
         users = await db.list_users()
-        
+
         for user in users:
             discord_id = user["discord_id"]
             username = user["chesscom_username"]
-            
+
             in_club = await is_player_in_club(username, club_id)
             if not in_club:
                 member = guild.get_member(int(discord_id)) or await guild.fetch_member(int(discord_id))
@@ -280,13 +281,52 @@ class ChessClubBot(commands.Bot):
                     except Exception as e:
                         logger.warning("Failed to remove verified role from %s: %s", member.display_name, e)
 
+    @tasks.loop(hours=6)
+    async def monitoring_loop(self) -> None:
+        """Fair play monitoring and rating snapshotting."""
+        guild_id = self.dynamic_settings.get("discord_guild_id")
+        if not guild_id:
+            return
+
+        guild = self.get_guild(int(guild_id))
+        if not guild:
+            return
+
+        users = await db.list_users()
+        for user in users:
+            discord_id = user["discord_id"]
+            username = user["chesscom_username"]
+
+            try:
+                stats = await fetch_chesscom_stats(username)
+                profile = stats.profile
+                status = profile.get("status", "unknown")
+
+                # Rating for snapshots
+                rapid = stats.stats.get("chess_rapid", {}).get("last", {}).get("rating", 0)
+                blitz = stats.stats.get("chess_blitz", {}).get("last", {}).get("rating", 0)
+                rating = max(rapid, blitz)
+
+                prev = await db.update_player_snapshot(discord_id, username, status, rating)
+
+                # Fair Play Check
+                if "closed:fair_play_violations" in status.lower():
+                    if not prev or "closed:fair_play_violations" not in prev.get("status", "").lower():
+                        # New violation detected
+                        msg = f"⚠️ **Fair Play Violation Detected!**\nUser `{username}` (<@{discord_id}>) has had their Chess.com account closed for fair play violations."
+                        await self.safe_send(self.results_channel_id(), content=msg)
+                        logger.warning("Fair play violation: %s", username)
+
+            except Exception as e:
+                logger.warning("Monitoring error for %s: %s", username, e)
+
     @tasks.loop(hours=12)
     async def rating_roles_loop(self) -> None:
         """Automatically update roles based on Chess.com ratings."""
         guild_id = self.dynamic_settings.get("discord_guild_id")
         if not guild_id:
             return
-            
+
         guild = self.get_guild(int(guild_id))
         if not guild:
             return
@@ -297,7 +337,7 @@ class ChessClubBot(commands.Bot):
             "discord_intermediate_role_id": 1200,
             "discord_beginner_role_id": 0
         }
-        
+
         roles = {}
         for key, min_rating in role_mapping.items():
             role_id = self.dynamic_settings.get(key)
@@ -313,36 +353,56 @@ class ChessClubBot(commands.Bot):
         for user in users:
             discord_id = user["discord_id"]
             username = user["chesscom_username"]
-            
+
             try:
+                # We can use the snapshot rating if fresh enough, but let's fetch for accuracy
                 stats = await fetch_chesscom_stats(username)
-                # Use the highest of Rapid/Blitz
                 rapid = stats.stats.get("chess_rapid", {}).get("last", {}).get("rating", 0)
                 blitz = stats.stats.get("chess_blitz", {}).get("last", {}).get("rating", 0)
                 rating = max(rapid, blitz)
-                
+
                 member = guild.get_member(int(discord_id)) or await guild.fetch_member(int(discord_id))
                 if not member:
                     continue
 
-                # Determine best role
                 best_role = None
                 for min_rating in sorted(roles.keys(), reverse=True):
                     if rating >= min_rating:
                         best_role = roles[min_rating]
                         break
-                
+
                 if best_role:
-                    # Remove other rating roles
                     to_remove = [r for r in roles.values() if r in member.roles and r != best_role]
                     if to_remove:
                         await member.remove_roles(*to_remove)
-                    
                     if best_role not in member.roles:
                         await member.add_roles(best_role)
-                        logger.info("Assigned rating role %s to %s (Rating: %s)", best_role.name, member.display_name, rating)
-            except Exception as e:
-                logger.warning("Failed to update rating roles for %s: %s", username, e)
+            except Exception:
+                pass
+
+    @tasks.loop(hours=168) # Weekly
+    async def weekly_report_loop(self) -> None:
+        """Generate and post weekly club performance report."""
+        winners = await db.get_recent_winners(7)
+        improved = await db.get_weekly_rating_diffs()
+
+        winners_text = ", ".join([f"{w.get('winner')} ({w['name']})" for w in winners if w.get("winner")]) or "No winners this week."
+        improved_text = ", ".join([f"{i['username']} (+{i['diff']})" for i in improved[:3] if i['diff'] > 0]) or "No rating gains this week."
+        potw = improved[0]['username'] if improved else "None"
+
+        context = {
+            "winners": winners_text,
+            "improved": improved_text,
+            "potw": potw
+        }
+
+        report = await ai_service.generate_message("weekly_report", context)
+        embed = discord.Embed(
+            title="📊 Weekly Club Performance Report",
+            description=report,
+            color=discord.Color.purple()
+        )
+        await self.safe_send(self.announcement_channel_id(), embed=embed)
 
     @daily_puzzle_loop.before_loop
     async def before_daily_puzzle_loop(self) -> None:
@@ -357,34 +417,61 @@ class ChessClubBot(commands.Bot):
         if target <= now:
             target += timedelta(days=1)
         await asyncio.sleep((target - now).total_seconds())
-    
+
     @club_verification_loop.before_loop
     @rating_roles_loop.before_loop
+    @monitoring_loop.before_loop
+    @weekly_report_loop.before_loop
     async def before_other_loops(self) -> None:
         await self.wait_until_ready()
 
 
-
-def build_bot(settings: Settings) -> ChessClubBot:
+    def build_bot(settings: Settings) -> ChessClubBot:
     bot = ChessClubBot(settings)
 
     @bot.event
     async def on_message(message: discord.Message):
         if message.author.bot:
             return
-        
-        # Check if bot is mentioned
+
+        # Interactive Puzzle Solving
+        if message.channel.id == bot.puzzle_channel_id():
+            active = await db.get_active_puzzle()
+            if active and active.get("solution"):
+                # Check if message matches the first move of the solution
+                content = message.content.strip().lower()
+                solution = active["solution"]
+
+                # Check if user already solved it
+                if str(message.author.id) in active.get("solved_by", []):
+                    # Silently ignore or maybe a small react?
+                    return
+
+                if content == solution[0].lower():
+                    # Correct first move!
+                    first_time = await db.mark_puzzle_solved(active["puzzle_id"], str(message.author.id))
+                    if first_time:
+                        await message.add_reaction("✅")
+                        # Optional: Respond with next part or just congrats
+                        if len(solution) > 1:
+                            await message.reply(f"Correct! The full solution is: `{' '.join(solution)}`")
+                        else:
+                            await message.reply("Spot on! You solved today's puzzle.")
+                elif len(content) >= 4 and any(s.lower() == content for s in solution):
+                    # They sent a later move or the whole thing?
+                     await message.add_reaction("❌")
+
+        # AI Mention Logic
         if bot.user in message.mentions:
-            # Strip the mention from the content
             content = message.content.replace(f"<@!{bot.user.id}>", "").replace(f"<@{bot.user.id}>", "").strip()
             if not content:
                 await message.channel.send("Grandmaster is here! ♟️ How can I help you? (Ask me a chess question!)")
                 return
-            
+
             async with message.channel.typing():
                 answer = await ai_service.ask_funny_question(content)
                 await message.reply(answer)
-        
+
         await bot.process_commands(message)
 
     @bot.tree.command(name="puzzle", description="Post today's Lichess puzzle in this channel")
@@ -397,15 +484,65 @@ def build_bot(settings: Settings) -> ChessClubBot:
             return
 
         content = puzzle_message(puzzle)
-        jpg_path = render_puzzle_jpg(puzzle)
+        await db.set_active_puzzle(puzzle.puzzle_id, puzzle.solution)
+        await interaction.followup.send(content=content)
+
+    @bot.tree.command(name="puzzle_leaderboard", description="Show the top puzzle solvers")
+    async def puzzle_leaderboard(interaction: discord.Interaction) -> None:
+        leaders = await db.get_puzzle_leaderboard()
+        if not leaders:
+            await interaction.response.send_message("No one has solved any puzzles yet!")
+            return
+
+        lines = []
+        for i, l in enumerate(leaders):
+            lines.append(f"**{i+1}.** <@{l['discord_id']}> — {l['solves']} solves")
+
+        embed = discord.Embed(
+            title="🧩 Puzzle Leaderboard",
+            description="\n".join(lines),
+            color=discord.Color.blue()
+        )
+        await interaction.response.send_message(embed=embed)
+
+    @bot.tree.command(name="compare", description="Compare your stats with another member")
+    @app_commands.describe(member="The member to compare against")
+    async def compare_command(interaction: discord.Interaction, member: discord.Member) -> None:
+        await interaction.response.defer()
+
+        u1 = await db.get_chesscom_username_by_discord(str(interaction.user.id))
+        u2 = await db.get_chesscom_username_by_discord(str(member.id))
+
+        if not u1:
+            await interaction.followup.send("You haven't linked your account with `/link`.")
+            return
+        if not u2:
+            await interaction.followup.send(f"{member.display_name} hasn't linked their account.")
+            return
+
         try:
-            file = discord.File(str(jpg_path), filename="puzzle.jpg")
-            await interaction.followup.send(content=content, file=file)
-        finally:
-            try:
-                jpg_path.unlink(missing_ok=True)
-            except OSError:
-                logger.warning("Failed to remove temporary puzzle image %s", jpg_path)
+            s1 = await fetch_chesscom_stats(u1)
+            s2 = await fetch_chesscom_stats(u2)
+            c1 = await db.get_user_stats(u1)
+            c2 = await db.get_user_stats(u2)
+        except Exception:
+            await interaction.followup.send("Error fetching stats.")
+            return
+
+        embed = discord.Embed(title=f"⚔️ Comparison: {u1} vs {u2}", color=discord.Color.dark_red())
+
+        def get_r(s, k): return s.stats.get(k, {}).get("last", {}).get("rating", 0)
+
+        lines = [
+            f"**Club Wins:** {c1['wins']} vs {c2['wins']}",
+            f"**Club Podiums:** {c1['podiums']} vs {c2['podiums']}",
+            f"**Rapid:** {get_r(s1, 'chess_rapid')} vs {get_r(s2, 'chess_rapid')}",
+            f"**Blitz:** {get_r(s1, 'chess_blitz')} vs {get_r(s2, 'chess_blitz')}",
+            f"**Bullet:** {get_r(s1, 'chess_bullet')} vs {get_r(s2, 'chess_bullet')}"
+        ]
+        embed.description = "\n".join(lines)
+        await interaction.followup.send(embed=embed)
+
 
     @bot.tree.command(name="link", description="Link your Chess.com username to your Discord account")
     @app_commands.describe(username="Your Chess.com username")

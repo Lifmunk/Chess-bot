@@ -53,6 +53,13 @@ class GroqService:
                 "Keep responses witty, short, and natural. "
                 "Do not overuse Martian references."
             ),
+            "weekly_report": (
+                "Write a weekly club performance report. "
+                f"Winners this week: {context.get('winners')}. "
+                f"Most improved ratings: {context.get('improved')}. "
+                f"Player of the week: {context.get('potw')}. "
+                "Keep it professional, encouraging, and fun. Use a mix of bullet points and natural text."
+            ),
         }
 
         prompt = prompts.get(
