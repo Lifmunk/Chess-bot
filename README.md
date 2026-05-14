@@ -93,7 +93,9 @@ docker-compose up --build
 | `/opening` | Show the current "Opening of the Week." |
 | `/ask <question>` | Ask the AI Grandmaster a chess-themed question. |
 | `/next` | Show details for the next scheduled club tournament. |
+| `/trigger_puzzle` (Admin) | Post the daily puzzle immediately. |
 | `/sync` (Admin) | Force a re-sync of slash commands to the server. |
+| `/tournament info <id>` | Show a stored tournament by ID. |
 
 ---
 

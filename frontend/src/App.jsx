@@ -8,7 +8,6 @@ import {
   listTournaments,
   login,
   me,
-  nuke,
   startTournament,
   updateTournament,
   deleteTournament,
@@ -438,20 +437,6 @@ function App() {
     try {
       await updateSettings(token, appSettings);
       notify("Settings updated successfully");
-    } catch (err) {
-      notify(err.message, "error");
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  async function handleNuke() {
-    if (!window.confirm("Delete all records? This cannot be undone.")) return;
-    setBusyAction("nuke");
-    try {
-      await nuke(token);
-      notify("Database cleared", "error");
-      window.location.reload();
     } catch (err) {
       notify(err.message, "error");
     } finally {
@@ -1071,14 +1056,6 @@ function App() {
                     </form>
                 </section>
                 
-                <section className="p-8 bg-red-50 rounded-2xl border border-red-100 space-y-4">
-                    <div className="flex items-center gap-3 text-danger">
-                        <span className="text-xl">⚠️</span>
-                        <h2 className="text-lg font-bold">Danger Zone</h2>
-                    </div>
-                    <p className="text-sm text-red-600 font-medium">Permanently delete all tournament records, member links, and history. This action cannot be undone.</p>
-                    <button className="btn btn-danger" onClick={handleNuke}>Nuke Database</button>
-                </section>
             </div>
           )}
         </main>

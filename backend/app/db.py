@@ -79,13 +79,6 @@ def parse_dt(value: Any) -> datetime | None:
     except Exception:
         return None
 
-async def nuke_database() -> None:
-    database = get_db()
-    await database.tournaments.delete_many({})
-    await database.users.delete_many({})
-    await database.announcements.delete_many({})
-    logging.info("Database nuked.")
-
 def generate_tournament_id() -> str:
     stamp = utc_now().strftime("%Y%m%d")
     suffix = token_hex(2).upper()
@@ -359,6 +352,10 @@ async def set_active_puzzle(puzzle_id: str, solution: list[str], fen: str) -> No
         upsert=True
     )
 
+async def get_active_puzzle() -> dict[str, Any] | None:
+    database = get_db()
+    return await database.puzzles.find_one({"_id": "active"})
+
 async def set_puzzle_attempt(discord_id: str, puzzle_id: str, current_move_index: int) -> None:
     database = get_db()
     await database.puzzle_attempts.update_one(
@@ -425,10 +422,6 @@ async def get_user_match_seek(discord_id: str) -> dict[str, Any] | None:
     database = get_db()
     return await database.match_seeks.find_one({"discord_id": discord_id})
 
-async def get_all_match_seeks() -> list[dict[str, Any]]:
-    database = get_db()
-    cursor = database.match_seeks.find({})
-    return await cursor.to_list(length=100)
 async def update_player_snapshot(discord_id: str, username: str, status: str, rating: int) -> dict[str, Any] | None:
     database = get_db()
     now = utc_now()

@@ -24,7 +24,8 @@ class ChessClubBot(commands.Bot):
         intents = discord.Intents.default()
         intents.guilds = True
         intents.members = True
-        intents.presences = True # Required to see who is online
+        intents.presences = True
+        intents.message_content = True
         super().__init__(command_prefix="!", intents=intents)
         self.settings = settings
         self._ready_event = asyncio.Event()
@@ -36,38 +37,55 @@ class ChessClubBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         await self.refresh_settings()
+        await self.sync_application_commands()
+        self.start_background_tasks()
+
+    async def sync_application_commands(self) -> None:
         guild_id = self.dynamic_settings.get("discord_guild_id")
-        
-        # We always sync globally to ensure commands are available everywhere.
-        # Global sync can take up to an hour to propagate.
-        try:
-            await self.tree.sync()
-            logger.info("Commands synced globally")
-        except Exception as e:
-            logger.error("Failed to sync commands globally: %s", e)
-        
-        # If a specific guild is configured, we sync to it for immediate updates.
+
         if guild_id:
             try:
                 guild = discord.Object(id=int(guild_id))
+                await self.delete_global_commands()
                 self.tree.copy_global_to(guild=guild)
                 await self.tree.sync(guild=guild)
-                logger.info("Commands synced to guild %s (instant sync)", guild_id)
-            except Exception as e:
-                logger.warning("Failed to sync commands to guild %s: %s", guild_id, e)
-        
+                logger.info("Commands synced to guild %s", guild_id)
+            except Exception:
+                logger.exception("Failed to sync commands to guild %s", guild_id)
+            return
+
+        try:
+            await self.tree.sync()
+            logger.info("Commands synced globally")
+        except Exception:
+            logger.exception("Failed to sync commands globally")
+
+    async def delete_global_commands(self) -> None:
+        commands_to_restore = list(self.tree.get_commands(guild=None))
+        if not commands_to_restore:
+            return
+
+        self.tree.clear_commands(guild=None)
+        try:
+            await self.tree.sync(guild=None)
+        finally:
+            for command in commands_to_restore:
+                self.tree.add_command(command)
+        logger.info("Cleared global commands to avoid duplicate guild/global entries")
+
+    def start_background_tasks(self) -> None:
         if not self.daily_puzzle_loop.is_running():
             self.daily_puzzle_loop.start()
-        
+
         if not self.club_verification_loop.is_running():
             self.club_verification_loop.start()
-            
+
         if not self.rating_roles_loop.is_running():
             self.rating_roles_loop.start()
 
         if not self.monitoring_loop.is_running():
             self.monitoring_loop.start()
-            
+
         if not self.weekly_report_loop.is_running():
             self.weekly_report_loop.start()
 
@@ -258,6 +276,87 @@ class ChessClubBot(commands.Bot):
         file = discord.File(image_buf, filename=f"puzzle_{puzzle.puzzle_id}.png")
 
         await self.safe_send(self.puzzle_channel_id(), content=content, file=file)
+
+    async def update_member_roles(self, discord_id: str) -> None:
+        guild_id = self.dynamic_settings.get("discord_guild_id")
+        if not guild_id:
+            return
+
+        guild = self.get_guild(int(guild_id))
+        if not guild:
+            return
+
+        try:
+            member = guild.get_member(int(discord_id)) or await guild.fetch_member(int(discord_id))
+        except Exception:
+            return
+
+        verified_role_id = self.dynamic_settings.get("discord_verified_role_id")
+        if verified_role_id:
+            role = guild.get_role(int(verified_role_id))
+            if role and role not in member.roles:
+                try:
+                    await member.add_roles(role)
+                except Exception:
+                    logger.warning("Failed to add verified role to %s", discord_id)
+
+        username = await db.get_chesscom_username_by_discord(discord_id)
+        if not username:
+            return
+
+        try:
+            stats = await fetch_chesscom_stats(username)
+            rapid = stats.stats.get("chess_rapid", {}).get("last", {}).get("rating", 0)
+            blitz = stats.stats.get("chess_blitz", {}).get("last", {}).get("rating", 0)
+            rating = max(rapid, blitz)
+
+            role_mapping = {
+                "discord_expert_role_id": 2000,
+                "discord_intermediate_role_id": 1200,
+                "discord_beginner_role_id": 0,
+            }
+
+            roles = {}
+            for key, min_rating in role_mapping.items():
+                role_id = self.dynamic_settings.get(key)
+                if role_id:
+                    role = guild.get_role(int(role_id))
+                    if role:
+                        roles[min_rating] = role
+
+            best_role = None
+            for min_rating in sorted(roles.keys(), reverse=True):
+                if rating >= min_rating:
+                    best_role = roles[min_rating]
+                    break
+
+            if best_role:
+                to_remove = [role for role in roles.values() if role in member.roles and role != best_role]
+                if to_remove:
+                    await member.remove_roles(*to_remove)
+                if best_role not in member.roles:
+                    await member.add_roles(best_role)
+        except Exception:
+            logger.warning("Failed to update rating roles for %s", discord_id)
+
+    def get_guild_channels(self) -> list[dict[str, Any]]:
+        guild_id = self.dynamic_settings.get("discord_guild_id")
+        if not guild_id:
+            return []
+
+        guild = self.get_guild(int(guild_id))
+        if not guild:
+            return []
+
+        channels = [
+            {
+                "id": str(channel.id),
+                "name": channel.name,
+                "category": channel.category.name if channel.category else None,
+            }
+            for channel in guild.text_channels
+        ]
+        return sorted(channels, key=lambda item: (item["category"] or "", item["name"]))
 
     @tasks.loop(hours=24)
     async def daily_puzzle_loop(self) -> None:
@@ -569,7 +668,8 @@ def build_bot(settings: Settings) -> ChessClubBot:
         embed.add_field(name="/link", value="Link your Chess.com username", inline=False)
         embed.add_field(name="/leaderboard", value="Show the top club players by tournament wins", inline=False)
         embed.add_field(name="/ask", value="Ask the AI Grandmaster a question", inline=False)
-        embed.add_field(name="/puzzle", value="Post today's Lichess puzzle", inline=False)
+        embed.add_field(name="/solve", value="Privately solve the active daily puzzle", inline=False)
+        embed.add_field(name="/trigger_puzzle", value="Admin only: post the daily puzzle now", inline=False)
         embed.add_field(name="/puzzle_leaderboard", value="Show the top puzzle solvers", inline=False)
         embed.add_field(name="/compare", value="Compare your stats with another member", inline=False)
         embed.add_field(name="/next", value="Show the details of the next scheduled tournament", inline=False)
@@ -637,7 +737,8 @@ def build_bot(settings: Settings) -> ChessClubBot:
     async def sync_commands(interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         try:
-            await bot.setup_hook()
+            await bot.refresh_settings()
+            await bot.sync_application_commands()
             await interaction.followup.send("Commands synced successfully!", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"Failed to sync: {e}", ephemeral=True)
@@ -759,106 +860,21 @@ def build_bot(settings: Settings) -> ChessClubBot:
         embed.description = "\n".join(lines)
         await interaction.followup.send(embed=embed)
 
-
-    async def update_member_roles(self, discord_id: str) -> None:
-        """Update both verified and rating roles for a member immediately."""
-        guild_id = self.dynamic_settings.get("discord_guild_id")
-        if not guild_id:
-            return
-            
-        guild = self.get_guild(int(guild_id))
-        if not guild:
-            return
-            
-        try:
-            member = guild.get_member(int(discord_id)) or await guild.fetch_member(int(discord_id))
-        except Exception:
-            return
-
-        # 1. Verified Role
-        verified_role_id = self.dynamic_settings.get("discord_verified_role_id")
-        if verified_role_id:
-            role = guild.get_role(int(verified_role_id))
-            if role and role not in member.roles:
-                try:
-                    await member.add_roles(role)
-                except Exception:
-                    pass
-
-        # 2. Rating Roles
-        username = await db.get_chesscom_username_by_discord(discord_id)
-        if not username:
-            return
-
-        try:
-            stats = await fetch_chesscom_stats(username)
-            rapid = stats.stats.get("chess_rapid", {}).get("last", {}).get("rating", 0)
-            blitz = stats.stats.get("chess_blitz", {}).get("last", {}).get("rating", 0)
-            rating = max(rapid, blitz)
-
-            role_mapping = {
-                "discord_expert_role_id": 2000,
-                "discord_intermediate_role_id": 1200,
-                "discord_beginner_role_id": 0
-            }
-
-            roles = {}
-            for key, min_rating in role_mapping.items():
-                rid = self.dynamic_settings.get(key)
-                if rid:
-                    r = guild.get_role(int(rid))
-                    if r:
-                        roles[min_rating] = r
-
-            if roles:
-                best_role = None
-                for min_rating in sorted(roles.keys(), reverse=True):
-                    if rating >= min_rating:
-                        best_role = roles[min_rating]
-                        break
-                
-                if best_role:
-                    to_remove = [r for r in roles.values() if r in member.roles and r != best_role]
-                    if to_remove:
-                        await member.remove_roles(*to_remove)
-                    if best_role not in member.roles:
-                        await member.add_roles(best_role)
-        except Exception:
-            pass
-
-    def get_guild_channels(self) -> list[dict[str, Any]]:
-        guild_id = self.dynamic_settings.get("discord_guild_id")
-        if not guild_id:
-            return []
-        guild = self.get_guild(int(guild_id))
-        if not guild:
-            return []
-            
-        channels = []
-        for channel in guild.text_channels:
-            channels.append({
-                "id": str(channel.id),
-                "name": channel.name,
-                "category": channel.category.name if channel.category else None
-            })
-        return sorted(channels, key=lambda x: (x["category"] or "", x["name"]))
-
     @bot.tree.command(name="link", description="Link your Chess.com username to your Discord account")
     @app_commands.describe(username="Your Chess.com username")
     async def link_command(interaction: discord.Interaction, username: str) -> None:
         await interaction.response.defer(ephemeral=True)
-        
-        # Check if user is in club
+
         from .services.chesscom import is_player_in_club
         club_id = bot.dynamic_settings.get("chesscom_club_id")
-        in_club = await is_player_in_club(username, club_id)
-        
-        if not in_club:
-            await interaction.followup.send(
-                f"I couldn't find `{username}` in our Chess.com club. Please join the club first!", 
-                ephemeral=True
-            )
-            return
+        if club_id:
+            in_club = await is_player_in_club(username, club_id)
+            if not in_club:
+                await interaction.followup.send(
+                    f"I couldn't find `{username}` in our Chess.com club. Please join the club first!",
+                    ephemeral=True,
+                )
+                return
 
         await db.link_user(str(interaction.user.id), username)
         await bot.update_member_roles(str(interaction.user.id))

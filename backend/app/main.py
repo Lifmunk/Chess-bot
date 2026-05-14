@@ -7,7 +7,6 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from . import db
 from .config import get_settings
@@ -301,19 +300,6 @@ async def health() -> dict[str, str]:
     }
 
 
-@app.get("/test")
-async def test_endpoint() -> dict[str, str]:
-    import random
-    messages = [
-        "Hello from the Chess Club API!",
-        "Everything is working perfectly.",
-        "System check: All systems go.",
-        "Greetings, grandmaster!",
-        "Ready for the next tournament?"
-    ]
-    return {"message": random.choice(messages)}
-
-
 @app.post("/auth/login", response_model=TokenResponse)
 async def login(payload: LoginRequest) -> TokenResponse:
     if payload.password != settings.admin_password:
@@ -556,42 +542,6 @@ async def delete_announcement(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@app.get("/templates")
-async def templates(_: dict = Depends(require_admin)) -> dict[str, list[str]]:
-    return {
-        "created": [
-            "Tournament scheduled: {name}",
-            "Format: {format}",
-            "Rated: {rated}",
-            "Scheduled start: {scheduled_for}",
-            "Tournament link: {link}",
-        ],
-        "started": [
-            "Tournament started: {name}",
-            "Players may now join from the official Chess.com page.",
-            "Link: {link}",
-        ],
-        "finished": [
-            "Tournament completed: {name}",
-            "Winner: {winner}",
-            "Runner-up: {runner_up}",
-            "Third place: {third_place}",
-        ],
-        "puzzle": [
-            "Daily puzzle: {puzzle_id}",
-            "Rating: {rating} | Plays: {plays}",
-            "Themes: {themes}",
-            "Source: Lichess",
-        ],
-    }
-
-
-@app.post("/nuke", status_code=status.HTTP_204_NO_CONTENT)
-async def nuke(_: dict = Depends(require_admin)) -> Response:
-    await db.nuke_database()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
 @app.get("/settings")
 async def get_settings_endpoint(_: dict = Depends(require_admin)) -> dict[str, Any]:
     return await db.get_app_settings()
@@ -609,7 +559,6 @@ async def update_settings_endpoint(payload: dict[str, Any] = Body(...), _: dict 
         # If guild ID changed, re-sync commands
         if old_settings.get("discord_guild_id") != new_settings.get("discord_guild_id"):
             logging.info("Discord Guild ID changed, triggering command sync...")
-            await app.state.discord.bot.setup_hook()
+            await app.state.discord.bot.sync_application_commands()
 
     return new_settings
-

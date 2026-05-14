@@ -122,16 +122,8 @@ export function sendAnnouncementNow(token, id) {
   return request(`/announcements/${id}/send`, { token, method: "POST" });
 }
 
-export function getTemplates(token) {
-  return request("/templates", { token });
-}
-
 export function getLeaderboard(token) {
   return request("/tournaments/leaderboard", { token });
-}
-
-export function nuke(token) {
-  return request("/nuke", { token, method: "POST" });
 }
 
 export function getSettings(token) {
@@ -144,8 +136,4 @@ export function updateSettings(token, payload) {
 
 export function getDiscordChannels(token) {
   return request("/discord/channels", { token });
-}
-
-export function getTest() {
-  return request("/test");
 }

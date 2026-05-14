@@ -30,10 +30,3 @@ envVarGroups:
   - name: chess-club-secrets
     vars:
       - key: DISCORD_BOT_TOKEN
-      - key: DISCORD_GUILD_ID
-      - key: DISCORD_ANNOUNCEMENT_CHANNEL_ID
-      - key: DISCORD_PUZZLE_CHANNEL_ID
-      - key: DISCORD_RESULTS_CHANNEL_ID
-      - key: DISCORD_PLAYERS_ROLE_ID
-      - key: DISCORD_VERIFIED_ROLE_ID
-      - key: DISCORD_CHAMPION_ROLE_ID

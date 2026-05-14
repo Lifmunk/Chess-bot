@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -8,6 +9,7 @@ from typing import Any
 import httpx
 
 
+logger = logging.getLogger(__name__)
 CHESSCOM_PROFILE_URL = "https://api.chess.com/pub/player/{username}"
 CHESSCOM_STATS_URL = "https://api.chess.com/pub/player/{username}/stats"
 
@@ -157,8 +159,8 @@ async def fetch_tournament_details(tournament_url: str) -> dict[str, Any] | None
                 "scheduled_for": dt,
                 "description": data.get("description"),
             }
-    except Exception as e:
-        print(f"Error fetching tournament details: {e}")
+    except Exception:
+        logger.exception("Error fetching tournament details")
         return None
 
 
@@ -201,6 +203,6 @@ async def fetch_tournament_results(tournament_url: str) -> dict[str, Any] | None
                 "third_place": players[2].get("username") if len(players) > 2 else None,
                 "finished_at": datetime.now(timezone.utc)
             }
-    except Exception as e:
-        print(f"Error fetching results: {e}")
+    except Exception:
+        logger.exception("Error fetching tournament results")
         return None

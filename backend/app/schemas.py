@@ -119,7 +119,3 @@ class AnnouncementOut(BaseModel):
     scheduled_for: datetime
     sent: bool
     created_at: datetime
-
-
-class MessageResponse(BaseModel):
-    detail: str

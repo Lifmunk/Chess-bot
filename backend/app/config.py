@@ -1,5 +1,4 @@
 from functools import lru_cache
-from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -46,17 +45,13 @@ class Settings(BaseSettings):
         if self.cors_origins == "*":
             return ["*"]
         
-        origins = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        origins = [origin.strip().rstrip("/") for origin in self.cors_origins.split(",") if origin.strip()]
         
         frontend = self.effective_frontend_url
         if frontend and frontend not in origins:
             origins.append(frontend)
                 
         return origins
-
-    @property
-    def database_dir(self) -> Path:
-        return self.database_path.parent
 
 
 @lru_cache(maxsize=1)
