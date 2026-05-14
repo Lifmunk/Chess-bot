@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -117,15 +118,22 @@ async def is_player_in_club(username: str, club_id: str) -> bool:
 async def fetch_tournament_details(tournament_url: str) -> dict[str, Any] | None:
     """
     Attempts to fetch tournament details from Chess.com API.
-    Expects a URL like https://www.chess.com/tournament/live/-tc-20230512-abcd
+    Supports various URL formats:
+    - https://www.chess.com/tournament/live/name-id
+    - https://www.chess.com/tournaments/live/name-id
+    - https://www.chess.com/play/tournament/12345
+    - https://www.chess.com/tournament/name-id
     """
-    if "chess.com/tournament/live/" not in tournament_url:
+    # Regex to extract the tournament ID/slug
+    # Matches: chess.com/(play/)?tournaments?/(live/)?([^/?#]+)
+    match = re.search(r"chess\.com/(?:play/)?tournaments?/(?:live/)?([^/?#]+)", tournament_url)
+    if not match:
         return None
 
+    url_id = match.group(1)
+    api_url = f"https://api.chess.com/pub/tournament/{url_id}"
+
     try:
-        url_id = tournament_url.split("tournament/live/")[-1].split("/")[0].split("?")[0]
-        api_url = f"https://api.chess.com/pub/tournament/{url_id}"
-        
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
             resp = await client.get(api_url)
             if resp.status_code != 200:
@@ -157,15 +165,15 @@ async def fetch_tournament_details(tournament_url: str) -> dict[str, Any] | None
 async def fetch_tournament_results(tournament_url: str) -> dict[str, Any] | None:
     """
     Attempts to fetch tournament results from Chess.com.
-    Expects a URL like https://www.chess.com/tournament/live/-tc-20230512-abcd
     """
-    if "chess.com/tournament/live/" not in tournament_url:
+    match = re.search(r"chess\.com/(?:play/)?tournaments?/(?:live/)?([^/?#]+)", tournament_url)
+    if not match:
         return None
 
+    url_id = match.group(1)
+    api_url = f"https://api.chess.com/pub/tournament/{url_id}"
+
     try:
-        url_id = tournament_url.split("tournament/live/")[-1].split("/")[0].split("?")[0]
-        api_url = f"https://api.chess.com/pub/tournament/{url_id}"
-        
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
             resp = await client.get(api_url)
             if resp.status_code != 200:

@@ -88,6 +88,9 @@ function App() {
     discord_players_role_id: "",
     discord_verified_role_id: "",
     discord_champion_role_id: "",
+    discord_expert_role_id: "",
+    discord_intermediate_role_id: "",
+    discord_beginner_role_id: "",
     chesscom_club_id: "",
   });
   const [query, setQuery] = useState("");
@@ -1022,6 +1025,11 @@ function App() {
                             <div className="space-y-1.5"><label className="label text-brand-400">Players Role</label><input className="input text-xs" value={appSettings.discord_players_role_id} onChange={e => setAppSettings({...appSettings, discord_players_role_id: e.target.value})} /></div>
                             <div className="space-y-1.5"><label className="label text-brand-400">Verified Role</label><input className="input text-xs" value={appSettings.discord_verified_role_id} onChange={e => setAppSettings({...appSettings, discord_verified_role_id: e.target.value})} /></div>
                             <div className="space-y-1.5"><label className="label text-brand-400">Champion Role</label><input className="input text-xs" value={appSettings.discord_champion_role_id} onChange={e => setAppSettings({...appSettings, discord_champion_role_id: e.target.value})} /></div>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="space-y-1.5"><label className="label text-brand-400">Expert Role (2000+)</label><input className="input text-xs" value={appSettings.discord_expert_role_id} onChange={e => setAppSettings({...appSettings, discord_expert_role_id: e.target.value})} /></div>
+                            <div className="space-y-1.5"><label className="label text-brand-400">Intermediate (1200+)</label><input className="input text-xs" value={appSettings.discord_intermediate_role_id} onChange={e => setAppSettings({...appSettings, discord_intermediate_role_id: e.target.value})} /></div>
+                            <div className="space-y-1.5"><label className="label text-brand-400">Beginner (0+)</label><input className="input text-xs" value={appSettings.discord_beginner_role_id} onChange={e => setAppSettings({...appSettings, discord_beginner_role_id: e.target.value})} /></div>
                           </div>
                         </div>
 

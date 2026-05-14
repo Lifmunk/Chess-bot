@@ -48,6 +48,12 @@ class ChessClubBot(commands.Bot):
         
         if not self.daily_puzzle_loop.is_running():
             self.daily_puzzle_loop.start()
+        
+        if not self.club_verification_loop.is_running():
+            self.club_verification_loop.start()
+            
+        if not self.rating_roles_loop.is_running():
+            self.rating_roles_loop.start()
 
     async def on_ready(self) -> None:
         logger.info("Discord bot ready as %s", self.user)
@@ -239,6 +245,105 @@ class ChessClubBot(commands.Bot):
     async def daily_puzzle_loop(self) -> None:
         await self.post_daily_puzzle()
 
+    @tasks.loop(hours=24)
+    async def club_verification_loop(self) -> None:
+        """Periodically verify linked users are still in the Chess.com club."""
+        guild_id = self.dynamic_settings.get("discord_guild_id")
+        verified_role_id = self.dynamic_settings.get("discord_verified_role_id")
+        club_id = self.dynamic_settings.get("chesscom_club_id")
+        
+        if not (guild_id and verified_role_id and club_id):
+            return
+
+        guild = self.get_guild(int(guild_id))
+        if not guild:
+            return
+
+        role = guild.get_role(int(verified_role_id))
+        if not role:
+            return
+
+        from .services.chesscom import is_player_in_club
+        users = await db.list_users()
+        
+        for user in users:
+            discord_id = user["discord_id"]
+            username = user["chesscom_username"]
+            
+            in_club = await is_player_in_club(username, club_id)
+            if not in_club:
+                member = guild.get_member(int(discord_id)) or await guild.fetch_member(int(discord_id))
+                if member and role in member.roles:
+                    try:
+                        await member.remove_roles(role, reason=f"User {username} no longer in Chess.com club")
+                        logger.info("Removed verified role from %s (not in club)", member.display_name)
+                    except Exception as e:
+                        logger.warning("Failed to remove verified role from %s: %s", member.display_name, e)
+
+    @tasks.loop(hours=12)
+    async def rating_roles_loop(self) -> None:
+        """Automatically update roles based on Chess.com ratings."""
+        guild_id = self.dynamic_settings.get("discord_guild_id")
+        if not guild_id:
+            return
+            
+        guild = self.get_guild(int(guild_id))
+        if not guild:
+            return
+
+        # Mapping of Rating -> Role ID (from settings)
+        role_mapping = {
+            "discord_expert_role_id": 2000,
+            "discord_intermediate_role_id": 1200,
+            "discord_beginner_role_id": 0
+        }
+        
+        roles = {}
+        for key, min_rating in role_mapping.items():
+            role_id = self.dynamic_settings.get(key)
+            if role_id:
+                role = guild.get_role(int(role_id))
+                if role:
+                    roles[min_rating] = role
+
+        if not roles:
+            return
+
+        users = await db.list_users()
+        for user in users:
+            discord_id = user["discord_id"]
+            username = user["chesscom_username"]
+            
+            try:
+                stats = await fetch_chesscom_stats(username)
+                # Use the highest of Rapid/Blitz
+                rapid = stats.stats.get("chess_rapid", {}).get("last", {}).get("rating", 0)
+                blitz = stats.stats.get("chess_blitz", {}).get("last", {}).get("rating", 0)
+                rating = max(rapid, blitz)
+                
+                member = guild.get_member(int(discord_id)) or await guild.fetch_member(int(discord_id))
+                if not member:
+                    continue
+
+                # Determine best role
+                best_role = None
+                for min_rating in sorted(roles.keys(), reverse=True):
+                    if rating >= min_rating:
+                        best_role = roles[min_rating]
+                        break
+                
+                if best_role:
+                    # Remove other rating roles
+                    to_remove = [r for r in roles.values() if r in member.roles and r != best_role]
+                    if to_remove:
+                        await member.remove_roles(*to_remove)
+                    
+                    if best_role not in member.roles:
+                        await member.add_roles(best_role)
+                        logger.info("Assigned rating role %s to %s (Rating: %s)", best_role.name, member.display_name, rating)
+            except Exception as e:
+                logger.warning("Failed to update rating roles for %s: %s", username, e)
+
     @daily_puzzle_loop.before_loop
     async def before_daily_puzzle_loop(self) -> None:
         await self.wait_until_ready()
@@ -252,6 +357,12 @@ class ChessClubBot(commands.Bot):
         if target <= now:
             target += timedelta(days=1)
         await asyncio.sleep((target - now).total_seconds())
+    
+    @club_verification_loop.before_loop
+    @rating_roles_loop.before_loop
+    async def before_other_loops(self) -> None:
+        await self.wait_until_ready()
+
 
 
 def build_bot(settings: Settings) -> ChessClubBot:
@@ -338,7 +449,7 @@ def build_bot(settings: Settings) -> ChessClubBot:
 
         await interaction.followup.send(msg, ephemeral=True)
 
-    @bot.tree.command(name="profile", description="Show your Chess Club profile with stats and rank")
+    @bot.tree.command(name="profile", description="Show your Chess Club profile with stats and ratings")
     @app_commands.describe(member="The member to show. Leave blank for yourself.")
     async def profile_command(interaction: discord.Interaction, member: discord.Member | None = None) -> None:
         await interaction.response.defer()
@@ -366,20 +477,35 @@ def build_bot(settings: Settings) -> ChessClubBot:
         )
         embed.set_thumbnail(url=target.display_avatar.url)
         
+        # Profile Details
+        details = [
+            f"**Name:** {summary.get('Name', 'Private')}",
+            f"**Status:** {summary.get('Status', 'unknown')}",
+            f"**Country:** {summary.get('Country', 'unknown')}",
+            f"**Joined:** {summary.get('Joined', 'unknown')}",
+            f"**Followers:** {summary.get('Followers', '0')}"
+        ]
+        embed.add_field(name="👤 Chess.com Profile", value="\n".join(details), inline=False)
+
         # Club Stats
         embed.add_field(name="🏆 Club Wins", value=str(club_stats["wins"]), inline=True)
         embed.add_field(name="🎖️ Podiums", value=str(club_stats["podiums"]), inline=True)
-        embed.add_field(name="⭐ Chess.com", value=username, inline=True)
+        embed.add_field(name="⭐ Username", value=username, inline=True)
         
         # Ratings
         ratings_text = []
         if "Rapid record" in summary: 
-            ratings_text.append(f"**Rapid:** {summary.get('Rapid record', 'N/A').split('  ')[0]} (Rating: {stats_data.stats.get('chess_rapid', {}).get('last', {}).get('rating', 'N/A')})")
+            rating = stats_data.stats.get('chess_rapid', {}).get('last', {}).get('rating', 'N/A')
+            ratings_text.append(f"**Rapid:** {rating} ({summary.get('Rapid record', 'N/A').split('  ')[0]})")
         if "Blitz record" in summary: 
-            ratings_text.append(f"**Blitz:** {summary.get('Blitz record', 'N/A').split('  ')[0]} (Rating: {stats_data.stats.get('chess_blitz', {}).get('last', {}).get('rating', 'N/A')})")
+            rating = stats_data.stats.get('chess_blitz', {}).get('last', {}).get('rating', 'N/A')
+            ratings_text.append(f"**Blitz:** {rating} ({summary.get('Blitz record', 'N/A').split('  ')[0]})")
+        if "Bullet record" in summary: 
+            rating = stats_data.stats.get('chess_bullet', {}).get('last', {}).get('rating', 'N/A')
+            ratings_text.append(f"**Bullet:** {rating} ({summary.get('Bullet record', 'N/A').split('  ')[0]})")
         
         if ratings_text:
-            embed.add_field(name="📈 Ratings", value="\n".join(ratings_text), inline=False)
+            embed.add_field(name="📈 Ratings & Records", value="\n".join(ratings_text), inline=False)
         
         # Recent History
         if club_stats["recent_history"]:
@@ -391,43 +517,6 @@ def build_bot(settings: Settings) -> ChessClubBot:
 
         await interaction.followup.send(embed=embed)
 
-    @bot.tree.command(name="stats", description="Show Chess.com stats for a player")
-    @app_commands.describe(username="Chess.com username. Leave blank to use your linked account.")
-    async def stats_command(interaction: discord.Interaction, username: str | None = None) -> None:
-        await interaction.response.defer(ephemeral=True)
-        target_username = username or await db.get_chesscom_username_by_discord(str(interaction.user.id))
-        if not target_username:
-            await interaction.followup.send("Provide a Chess.com username or link your account with /link first.", ephemeral=True)
-            return
-
-        try:
-            stats = await fetch_chesscom_stats(target_username)
-        except ValueError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
-            return
-        except Exception:
-            logger.exception("Failed to fetch Chess.com stats")
-            await interaction.followup.send("I could not fetch Chess.com stats right now.", ephemeral=True)
-            return
-
-        summary = build_stats_summary(stats)
-        embed = discord.Embed(
-            title=f"Chess.com stats for {summary['Username']}",
-            color=discord.Color.dark_green(),
-        )
-        embed.add_field(name="Name", value=summary["Name"], inline=True)
-        embed.add_field(name="Status", value=summary["Status"], inline=True)
-        embed.add_field(name="Country", value=summary["Country"], inline=True)
-        embed.add_field(name="Joined", value=summary["Joined"], inline=True)
-        embed.add_field(name="Last online", value=summary["Last online"], inline=True)
-        embed.add_field(name="Followers", value=summary["Followers"], inline=True)
-
-        for label, value in summary.items():
-            if label in {"Username", "Name", "Status", "Country", "Joined", "Last online", "Followers"}:
-                continue
-            embed.add_field(name=label, value=value, inline=True)
-
-        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @bot.tree.command(name="trigger_puzzle", description="Admin only: Manually trigger the daily puzzle post")
     @app_commands.checks.has_permissions(administrator=True)
