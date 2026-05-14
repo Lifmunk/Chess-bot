@@ -36,15 +36,22 @@ class ChessClubBot(commands.Bot):
     async def setup_hook(self) -> None:
         await self.refresh_settings()
         guild_id = self.dynamic_settings.get("discord_guild_id")
+        
         if guild_id:
             try:
                 guild = discord.Object(id=int(guild_id))
+                # To prevent duplicates (global + guild), we clear global commands first
+                self.tree.clear_commands(guild=None)
+                await self.tree.sync() 
+                
                 self.tree.copy_global_to(guild=guild)
                 await self.tree.sync(guild=guild)
+                logger.info("Commands synced to guild %s (global cleared)", guild_id)
             except Exception as e:
                 logger.warning("Failed to sync commands to guild %s: %s", guild_id, e)
         else:
             await self.tree.sync()
+            logger.info("Commands synced globally")
         
         if not self.daily_puzzle_loop.is_running():
             self.daily_puzzle_loop.start()
