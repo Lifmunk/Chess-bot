@@ -433,7 +433,7 @@ class ChessClubBot(commands.Bot):
         await self.wait_until_ready()
 
 
-    def build_bot(settings: Settings) -> ChessClubBot:
+def build_bot(settings: Settings) -> ChessClubBot:
     bot = ChessClubBot(settings)
 
     @bot.event
