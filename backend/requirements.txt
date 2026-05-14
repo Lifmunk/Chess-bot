@@ -6,7 +6,7 @@ httpx==0.28.1
 python-chess==1.999
 itsdangerous==2.2.0
 pydantic-settings==2.7.1
-Pillow==11.3.0
+cairosvg==2.7.1
 motor==3.6.0
 dnspython==2.8.0
 groq==0.15.0
